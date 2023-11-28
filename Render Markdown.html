@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Markdown Viewer</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        #status {
+            background-color: #f2f2f2;
+            padding: 10px;
+            border-bottom: 1px solid #ddd;
+        }
+
+        #content {
+            margin-top: 20px;
+            padding: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div id="status">
+        Status: <span id="statusText">Waiting for file...</span>
+        <button onclick="retry()">Retry</button>
+        <input type="file" id="fileInput" accept=".md">
+    </div>
+    <div id="content">
+        <!-- Rendered Markdown will be displayed here -->
+    </div>
+
+    <script>
+        document.getElementById('fileInput').addEventListener('change', handleFileSelect, false);
+
+        function handleFileSelect(event) {
+            const reader = new FileReader();
+            reader.onload = handleFileLoad;
+            reader.readAsText(event.target.files[0]);
+            document.getElementById('statusText').innerText = 'Reading file...';
+        }
+
+        function handleFileLoad(event) {
+            try {
+                const markdown = event.target.result;
+                document.getElementById('content').innerHTML = marked.parse(markdown);
+                document.getElementById('statusText').innerText = 'File loaded and rendered.';
+            } catch (error) {
+                document.getElementById('statusText').innerText = 'An error occurred: ' + error.message;
+            }
+        }
+
+        function retry() {
+            document.getElementById('fileInput').value = '';
+            document.getElementById('content').innerHTML = '';
+            document.getElementById('statusText').innerText = 'Waiting for file...';
+        }
+    </script>
+</body>
+</html>
