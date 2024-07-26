@@ -1,4 +1,3 @@
- <?xml version="1.0"?>
 <AlteryxDocument yxmdVer="2021.3">
   <Nodes>
     <Node ToolID="1">
@@ -221,28 +220,7 @@ FullFileLink = ...</DefaultAnnotationText>
     </Events>
     <RuntimeProperties>
       <Actions />
-      <Questions>
-        <Question>
-          <Type>Tab</Type>
-          <Description>Questions</Description>
-          <Name>Tab (8)</Name>
-          <ToolId value="8" />
-          <Questions>
-            <Question>
-              <Type>MacroInput</Type>
-              <Description>Macro Input (1)</Description>
-              <Name>Macro Input (1)</Name>
-              <ToolId value="1" />
-            </Question>
-            <Question>
-              <Type>MacroOutput</Type>
-              <Description>Macro Output (6)</Description>
-              <Name>Macro Output (6)</Name>
-              <ToolId value="6" />
-            </Question>
-          </Questions>
-        </Question>
-      </Questions>
+      <Questions />
       <ModuleType>Macro</ModuleType>
       <MacroCustomHelp value="False" />
       <MacroDynamicOutputFields value="False" />
