@@ -5,7 +5,6 @@ from openpyxl.utils import get_column_letter
 import os
 import hashlib
 from difflib import SequenceMatcher
-from itertools import combinations
 
 def unmerge_cells(worksheet):
     merged_ranges = list(worksheet.merged_cells.ranges)
@@ -80,105 +79,71 @@ def compare_excel_files(file1_path, file2_path, output_path):
             df1 = pd.DataFrame(ws1.values)
             df2 = pd.DataFrame(ws2.values)
 
-            # Create hash dictionaries for both sheets
-            hash_dict1 = {}
-            hash_dict2 = {}
+            # Compare cells column by column
+            for col in range(df1.shape[1]):
+                processed_rows = set()
 
-            for i, row in df1.iterrows():
-                for j in range(len(row)):
-                    hash_key = create_hash(row[:j+1])
-                    if hash_key not in hash_dict1:
-                        hash_dict1[hash_key] = []
-                    hash_dict1[hash_key].append((i, j))
-
-            for i, row in df2.iterrows():
-                for j in range(len(row)):
-                    hash_key = create_hash(row[:j+1])
-                    if hash_key not in hash_dict2:
-                        hash_dict2[hash_key] = []
-                    hash_dict2[hash_key].append((i, j))
-
-            # Compare cells
-            processed_cells1 = set()
-            processed_cells2 = set()
-
-            for hash_key, positions1 in hash_dict1.items():
-                for i1, j1 in positions1:
-                    if (i1, j1) in processed_cells1 or pd.isna(df1.iloc[i1, j1]):
+                for row1 in range(df1.shape[0]):
+                    if pd.isna(df1.iloc[row1, col]):
                         continue
 
-                    if hash_key in hash_dict2:
-                        for i2, j2 in hash_dict2[hash_key]:
-                            if i1 != i2 or j1 != j2:
-                                # Cell moved
+                    # Create context hash using non-changed values in previous columns
+                    context_hash1 = create_hash([df1.iloc[row1, i] for i in range(col) if i not in processed_rows])
+                    
+                    found_match = False
+                    for row2 in range(df2.shape[0]):
+                        if row2 in processed_rows:
+                            continue
+
+                        context_hash2 = create_hash([df2.iloc[row2, i] for i in range(col) if i not in processed_rows])
+
+                        if context_hash1 == context_hash2:
+                            # Compare values
+                            value1 = df1.iloc[row1, col]
+                            value2 = df2.iloc[row2, col]
+                            change_type = compare_strings(value1, value2)
+
+                            if change_type != 'No change':
                                 row_num += 1
-                                function_id = df1.iloc[i1, 0]
+                                function_id = df1.iloc[row1, 0]
                                 function_name = get_function_details(wb1['Core OCIR Data']).get(function_id, {}).get('name', '')
                                 owner = get_function_details(wb1['Core OCIR Data']).get(function_id, {}).get('owner', '')
                                 ws_output.append([row_num, function_name, owner, sheet_name, 
-                                                  f'{get_column_letter(j1+1)}{i1+1}', df1.iloc[i1, j1],
-                                                  f'{get_column_letter(j2+1)}{i2+1}', df2.iloc[i2, j2],
-                                                  'Cell value moved'])
-                                for col in range(1, 10):
-                                    ws_output.cell(row=row_num+1, column=col).fill = PatternFill(start_color=colors['Cell value moved'], end_color=colors['Cell value moved'], fill_type='solid')
-                            processed_cells1.add((i1, j1))
-                            processed_cells2.add((i2, j2))
-                            break
-                    else:
-                        # Check for similar content with flexible matching
-                        found_match = False
-                        for k in range(j1, 0, -1):
-                            for combo in combinations(range(j1+1), j1-k+1):
-                                partial_hash = create_hash(df1.iloc[i1, list(combo)])
-                                matches = [(i, j) for h, positions in hash_dict2.items() for i, j in positions if create_hash(df2.iloc[i, list(combo)]) == partial_hash]
-                                if matches:
-                                    best_match = max(matches, key=lambda x: SequenceMatcher(None, str(df1.iloc[i1, j1]), str(df2.iloc[x[0], x[1]])).ratio())
-                                    i2, j2 = best_match
-                                    change_type = compare_strings(df1.iloc[i1, j1], df2.iloc[i2, j2])
-                                    if change_type != 'No change':
-                                        row_num += 1
-                                        function_id = df1.iloc[i1, 0]
-                                        function_name = get_function_details(wb1['Core OCIR Data']).get(function_id, {}).get('name', '')
-                                        owner = get_function_details(wb1['Core OCIR Data']).get(function_id, {}).get('owner', '')
-                                        ws_output.append([row_num, function_name, owner, sheet_name, 
-                                                          f'{get_column_letter(j1+1)}{i1+1}', df1.iloc[i1, j1],
-                                                          f'{get_column_letter(j2+1)}{i2+1}', df2.iloc[i2, j2],
-                                                          change_type])
-                                        for col in range(1, 10):
-                                            ws_output.cell(row=row_num+1, column=col).fill = PatternFill(start_color=colors[change_type], end_color=colors[change_type], fill_type='solid')
-                                    processed_cells1.add((i1, j1))
-                                    processed_cells2.add((i2, j2))
-                                    found_match = True
-                                    break
-                            if found_match:
-                                break
-                        if not found_match:
-                            # Cell deleted
-                            row_num += 1
-                            function_id = df1.iloc[i1, 0]
-                            function_name = get_function_details(wb1['Core OCIR Data']).get(function_id, {}).get('name', '')
-                            owner = get_function_details(wb1['Core OCIR Data']).get(function_id, {}).get('owner', '')
-                            ws_output.append([row_num, function_name, owner, sheet_name, 
-                                              f'{get_column_letter(j1+1)}{i1+1}', df1.iloc[i1, j1],
-                                              '', '', 'Cell value deleted'])
-                            for col in range(1, 10):
-                                ws_output.cell(row=row_num+1, column=col).fill = PatternFill(start_color=colors['Cell value deleted'], end_color=colors['Cell value deleted'], fill_type='solid')
-                        processed_cells1.add((i1, j1))
+                                                  f'{get_column_letter(col+1)}{row1+1}', value1,
+                                                  f'{get_column_letter(col+1)}{row2+1}', value2,
+                                                  change_type])
+                                for c in range(1, 10):
+                                    ws_output.cell(row=row_num+1, column=c).fill = PatternFill(start_color=colors[change_type], end_color=colors[change_type], fill_type='solid')
 
-            # Check for added cells
-            for hash_key, positions2 in hash_dict2.items():
-                for i2, j2 in positions2:
-                    if (i2, j2) not in processed_cells2 and not pd.isna(df2.iloc[i2, j2]):
+                            processed_rows.add(row2)
+                            found_match = True
+                            break
+
+                    if not found_match:
+                        # Cell deleted
                         row_num += 1
-                        function_id = df2.iloc[i2, 0]
+                        function_id = df1.iloc[row1, 0]
+                        function_name = get_function_details(wb1['Core OCIR Data']).get(function_id, {}).get('name', '')
+                        owner = get_function_details(wb1['Core OCIR Data']).get(function_id, {}).get('owner', '')
+                        ws_output.append([row_num, function_name, owner, sheet_name, 
+                                          f'{get_column_letter(col+1)}{row1+1}', df1.iloc[row1, col],
+                                          '', '', 'Cell value deleted'])
+                        for c in range(1, 10):
+                            ws_output.cell(row=row_num+1, column=c).fill = PatternFill(start_color=colors['Cell value deleted'], end_color=colors['Cell value deleted'], fill_type='solid')
+
+                # Check for added cells in this column
+                for row2 in range(df2.shape[0]):
+                    if row2 not in processed_rows and not pd.isna(df2.iloc[row2, col]):
+                        row_num += 1
+                        function_id = df2.iloc[row2, 0]
                         function_name = get_function_details(wb2['Core OCIR Data']).get(function_id, {}).get('name', '')
                         owner = get_function_details(wb2['Core OCIR Data']).get(function_id, {}).get('owner', '')
                         ws_output.append([row_num, function_name, owner, sheet_name, 
                                           '', '',
-                                          f'{get_column_letter(j2+1)}{i2+1}', df2.iloc[i2, j2],
+                                          f'{get_column_letter(col+1)}{row2+1}', df2.iloc[row2, col],
                                           'Cell value added'])
-                        for col in range(1, 10):
-                            ws_output.cell(row=row_num+1, column=col).fill = PatternFill(start_color=colors['Cell value added'], end_color=colors['Cell value added'], fill_type='solid')
+                        for c in range(1, 10):
+                            ws_output.cell(row=row_num+1, column=c).fill = PatternFill(start_color=colors['Cell value added'], end_color=colors['Cell value added'], fill_type='solid')
 
     # Add color legends
     ws_output['K2'] = 'Color Legend'
