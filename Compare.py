@@ -5,6 +5,7 @@ from openpyxl.utils import get_column_letter
 import os
 import hashlib
 from difflib import SequenceMatcher
+from collections import defaultdict
 
 def unmerge_cells(worksheet):
     merged_ranges = list(worksheet.merged_cells.ranges)
@@ -26,7 +27,9 @@ def create_hash(values):
     return hashlib.md5(''.join(str(v) for v in values if pd.notna(v) and v != '').encode()).hexdigest()
 
 def compare_strings(s1, s2):
-    ratio = SequenceMatcher(None, str(s1), str(s2)).ratio()
+    return SequenceMatcher(None, str(s1), str(s2)).ratio()
+
+def categorize_change(ratio):
     if ratio == 1:
         return 'No change'
     elif ratio > 0.8:
@@ -114,8 +117,8 @@ def compare_excel_files(file1_path, file2_path, output_path):
         changed_cells2 = set()
 
         for col in range(last_col1):
-            hash_dict1 = {}
-            hash_dict2 = {}
+            hash_dict1 = defaultdict(list)
+            hash_dict2 = defaultdict(list)
 
             for row in range(1, len(df1)):
                 if (row, col) in processed_cells1:
@@ -125,7 +128,7 @@ def compare_excel_files(file1_path, file2_path, output_path):
                 if not values1:
                     continue
                 hash_key = create_hash(values1)
-                hash_dict1[hash_key] = (row, col)
+                hash_dict1[hash_key].append((row, col))
 
             for row in range(1, len(df2)):
                 if (row, col) in processed_cells2:
@@ -135,82 +138,116 @@ def compare_excel_files(file1_path, file2_path, output_path):
                 if not values2:
                     continue
                 hash_key = create_hash(values2)
-                hash_dict2[hash_key] = (row, col)
+                hash_dict2[hash_key].append((row, col))
 
-            for hash_key, (row1, _) in hash_dict1.items():
+            for hash_key, positions1 in hash_dict1.items():
                 if hash_key in hash_dict2:
-                    row2, _ = hash_dict2[hash_key]
-                    if row1 != row2:
-                        # Cell moved
-                        row_num += 1
-                        function_id = df1.iloc[row1, 0]
-                        function_name = function_details.get(function_id, {}).get('name', '')
-                        owner = function_details.get(function_id, {}).get('owner', '')
-                        ws_output.append([row_num, function_name, owner, sheet_name, 
-                                          f'{get_column_letter(col+1)}{row1+1}', df1.iloc[row1, col],
-                                          f'{get_column_letter(col+1)}{row2+1}', df2.iloc[row2, col],
-                                          'Cell value moved'])
-                        for c in range(1, 10):
-                            ws_output.cell(row=row_num+1, column=c).fill = PatternFill(start_color=colors['Cell value moved'], end_color=colors['Cell value moved'], fill_type='solid')
-                    processed_cells1.add((row1, col))
-                    processed_cells2.add((row2, col))
+                    for row1, _ in positions1:
+                        for row2, _ in hash_dict2[hash_key]:
+                            if df1.iloc[row1, col] == df2.iloc[row2, col]:
+                                if row1 != row2:
+                                    # Cell moved
+                                    row_num += 1
+                                    function_id = df1.iloc[row1, 0]
+                                    function_name = function_details.get(function_id, {}).get('name', '')
+                                    owner = function_details.get(function_id, {}).get('owner', '')
+                                    ws_output.append([row_num, function_name, owner, sheet_name, 
+                                                      f'{get_column_letter(col+1)}{row1+1}', df1.iloc[row1, col],
+                                                      f'{get_column_letter(col+1)}{row2+1}', df2.iloc[row2, col],
+                                                      'Cell value moved'])
+                                    for c in range(1, 10):
+                                        ws_output.cell(row=row_num+1, column=c).fill = PatternFill(start_color=colors['Cell value moved'], end_color=colors['Cell value moved'], fill_type='solid')
+                                processed_cells1.add((row1, col))
+                                processed_cells2.add((row2, col))
                 else:
-                    # Check for partial matches
-                    partial_hash1 = create_hash([v for i, v in enumerate(df1.iloc[row1, :col].tolist()) 
-                                                 if (row1, i) not in changed_cells1])
-                    matches = [r for h, (r, _) in hash_dict2.items() 
-                               if create_hash([v for i, v in enumerate(df2.iloc[r, :col].tolist()) 
-                                               if (r, i) not in changed_cells2]) == partial_hash1]
-                    if matches:
-                        for match in matches:
-                            change_type = compare_strings(df1.iloc[row1, col], df2.iloc[match, col])
-                            if change_type != 'No change':
+                    for row1, _ in positions1:
+                        if (row1, col) in processed_cells1:
+                            continue
+                        # Check for partial matches
+                        partial_hash1 = create_hash([v for i, v in enumerate(df1.iloc[row1, :col].tolist()) 
+                                                     if (row1, i) not in changed_cells1])
+                        matches1 = [r for h, positions in hash_dict1.items() for r, _ in positions
+                                    if create_hash([v for i, v in enumerate(df1.iloc[r, :col].tolist()) 
+                                                    if (r, i) not in changed_cells1]) == partial_hash1]
+                        matches2 = [r for h, positions in hash_dict2.items() for r, _ in positions
+                                    if create_hash([v for i, v in enumerate(df2.iloc[r, :col].tolist()) 
+                                                    if (r, i) not in changed_cells2]) == partial_hash1]
+                        
+                        if matches2:
+                            comparisons = []
+                            for match1 in matches1:
+                                for match2 in matches2:
+                                    ratio = compare_strings(df1.iloc[match1, col], df2.iloc[match2, col])
+                                    comparisons.append((match1, match2, ratio))
+                            
+                            comparisons.sort(key=lambda x: x[2], reverse=True)
+                            
+                            for match1, match2, ratio in comparisons:
+                                if (match1, col) not in processed_cells1 and (match2, col) not in processed_cells2:
+                                    change_type = categorize_change(ratio)
+                                    if change_type != 'No change':
+                                        row_num += 1
+                                        function_id = df1.iloc[match1, 0]
+                                        function_name = function_details.get(function_id, {}).get('name', '')
+                                        owner = function_details.get(function_id, {}).get('owner', '')
+                                        summary = f"{change_type}"
+                                        if match1 != match2:
+                                            summary += " and Cell value moved"
+                                        ws_output.append([row_num, function_name, owner, sheet_name, 
+                                                          f'{get_column_letter(col+1)}{match1+1}', df1.iloc[match1, col],
+                                                          f'{get_column_letter(col+1)}{match2+1}', df2.iloc[match2, col],
+                                                          summary])
+                                        for c in range(1, 10):
+                                            ws_output.cell(row=row_num+1, column=c).fill = PatternFill(start_color=colors[change_type], end_color=colors[change_type], fill_type='solid')
+                                    processed_cells1.add((match1, col))
+                                    processed_cells2.add((match2, col))
+                                    changed_cells1.add((match1, col))
+                                    changed_cells2.add((match2, col))
+                                    break
+                            
+                            if (row1, col) not in processed_cells1:
+                                # Cell deleted
                                 row_num += 1
                                 function_id = df1.iloc[row1, 0]
                                 function_name = function_details.get(function_id, {}).get('name', '')
                                 owner = function_details.get(function_id, {}).get('owner', '')
-                                summary = f"{change_type}"
-                                if row1 != match:
-                                    summary += " and Cell value moved"
                                 ws_output.append([row_num, function_name, owner, sheet_name, 
                                                   f'{get_column_letter(col+1)}{row1+1}', df1.iloc[row1, col],
-                                                  f'{get_column_letter(col+1)}{match+1}', df2.iloc[match, col],
-                                                  summary])
+                                                  '', '', 'Cell value deleted'])
                                 for c in range(1, 10):
-                                    ws_output.cell(row=row_num+1, column=c).fill = PatternFill(start_color=colors[change_type], end_color=colors[change_type], fill_type='solid')
+                                    ws_output.cell(row=row_num+1, column=c).fill = PatternFill(start_color=colors['Cell value deleted'], end_color=colors['Cell value deleted'], fill_type='solid')
                                 changed_cells1.add((row1, col))
-                                changed_cells2.add((match, col))
+                                processed_cells1.add((row1, col))
+                        else:
+                            # Cell deleted
+                            row_num += 1
+                            function_id = df1.iloc[row1, 0]
+                            function_name = function_details.get(function_id, {}).get('name', '')
+                            owner = function_details.get(function_id, {}).get('owner', '')
+                            ws_output.append([row_num, function_name, owner, sheet_name, 
+                                              f'{get_column_letter(col+1)}{row1+1}', df1.iloc[row1, col],
+                                              '', '', 'Cell value deleted'])
+                            for c in range(1, 10):
+                                ws_output.cell(row=row_num+1, column=c).fill = PatternFill(start_color=colors['Cell value deleted'], end_color=colors['Cell value deleted'], fill_type='solid')
+                            changed_cells1.add((row1, col))
                             processed_cells1.add((row1, col))
-                            processed_cells2.add((match, col))
-                    else:
-                        # Cell deleted
+
+            # Check for added cells
+            for hash_key, positions2 in hash_dict2.items():
+                for row2, _ in positions2:
+                    if (row2, col) not in processed_cells2:
                         row_num += 1
-                        function_id = df1.iloc[row1, 0]
+                        function_id = df2.iloc[row2, 0]
                         function_name = function_details.get(function_id, {}).get('name', '')
                         owner = function_details.get(function_id, {}).get('owner', '')
                         ws_output.append([row_num, function_name, owner, sheet_name, 
-                                          f'{get_column_letter(col+1)}{row1+1}', df1.iloc[row1, col],
-                                          '', '', 'Cell value deleted'])
+                                          '', '',
+                                          f'{get_column_letter(col+1)}{row2+1}', df2.iloc[row2, col],
+                                          'Cell value added'])
                         for c in range(1, 10):
-                            ws_output.cell(row=row_num+1, column=c).fill = PatternFill(start_color=colors['Cell value deleted'], end_color=colors['Cell value deleted'], fill_type='solid')
-                        changed_cells1.add((row1, col))
-                    processed_cells1.add((row1, col))
-
-            # Check for added cells
-            for hash_key, (row2, _) in hash_dict2.items():
-                if (row2, col) not in processed_cells2:
-                    row_num += 1
-                    function_id = df2.iloc[row2, 0]
-                    function_name = function_details.get(function_id, {}).get('name', '')
-                    owner = function_details.get(function_id, {}).get('owner', '')
-                    ws_output.append([row_num, function_name, owner, sheet_name, 
-                                      '', '',
-                                      f'{get_column_letter(col+1)}{row2+1}', df2.iloc[row2, col],
-                                      'Cell value added'])
-                    for c in range(1, 10):
-                        ws_output.cell(row=row_num+1, column=c).fill = PatternFill(start_color=colors['Cell value added'], end_color=colors['Cell value added'], fill_type='solid')
-                    changed_cells2.add((row2, col))
-                    processed_cells2.add((row2, col))
+                            ws_output.cell(row=row_num+1, column=c).fill = PatternFill(start_color=colors['Cell value added'], end_color=colors['Cell value added'], fill_type='solid')
+                        changed_cells2.add((row2, col))
+                        processed_cells2.add((row2, col))
 
     # Add color legends
     ws_output['K2'] = 'Color Legend'
@@ -219,6 +256,8 @@ def compare_excel_files(file1_path, file2_path, output_path):
         cell = ws_output.cell(row=i, column=11, value=change_type)
         cell.fill = PatternFill(start_color=color, end_color=color, fill_type='solid')
         cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+
+    # Adjust column widths
 
     # Adjust column widths
     for col in ws_output.columns:
