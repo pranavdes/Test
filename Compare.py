@@ -65,7 +65,7 @@ def compare_excel_files(file1_path, file2_path, output_path):
         cell.fill = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
         cell.alignment = Alignment(horizontal='center', vertical='center')
 
-    row_num = 2
+    row_num = 1
     for sheet_name in wb1.sheetnames:
         if sheet_name == 'Core OCIR Data':
             continue
@@ -80,7 +80,13 @@ def compare_excel_files(file1_path, file2_path, output_path):
             df1 = pd.DataFrame(ws1.values)
             df2 = pd.DataFrame(ws2.values)
 
+            # Track processed cells to avoid duplicates
+            processed_cells = set()
+
             for (r1, c1), v1 in df1.stack().items():
+                if (r1, c1) in processed_cells:
+                    continue
+                
                 cell1 = f'{get_column_letter(c1+1)}{r1+1}'
                 function_id = df1.iloc[r1, 0] if c1 > 0 else v1
                 function_name = function_details.get(function_id, {}).get('name', '')
@@ -88,41 +94,51 @@ def compare_excel_files(file1_path, file2_path, output_path):
 
                 found = False
                 for (r2, c2), v2 in df2.stack().items():
+                    if (r2, c2) in processed_cells:
+                        continue
+                    
                     if str(v1).strip() == str(v2).strip():
                         if r1 != r2 or c1 != c2:
                             cell2 = f'{get_column_letter(c2+1)}{r2+1}'
+                            row_num += 1
                             ws_output.append([row_num, function_name, owner, sheet_name, cell1, v1, cell2, v2, 'Cell value moved'])
                             for col in range(1, 10):
                                 ws_output.cell(row=row_num, column=col).fill = PatternFill(start_color=colors['Cell value moved'], end_color=colors['Cell value moved'], fill_type='solid')
-                            row_num += 1
                         found = True
+                        processed_cells.add((r1, c1))
+                        processed_cells.add((r2, c2))
                         break
                     elif compare_content(v1, v2):
                         cell2 = f'{get_column_letter(c2+1)}{r2+1}'
                         change_type = compare_content(v1, v2)
+                        row_num += 1
                         ws_output.append([row_num, function_name, owner, sheet_name, cell1, v1, cell2, v2, change_type])
                         for col in range(1, 10):
                             ws_output.cell(row=row_num, column=col).fill = PatternFill(start_color=colors[change_type], end_color=colors[change_type], fill_type='solid')
-                        row_num += 1
                         found = True
+                        processed_cells.add((r1, c1))
+                        processed_cells.add((r2, c2))
                         break
 
                 if not found:
+                    row_num += 1
                     ws_output.append([row_num, function_name, owner, sheet_name, cell1, v1, '', '', 'Cell value deleted'])
                     for col in range(1, 10):
                         ws_output.cell(row=row_num, column=col).fill = PatternFill(start_color=colors['Cell value deleted'], end_color=colors['Cell value deleted'], fill_type='solid')
-                    row_num += 1
+                    processed_cells.add((r1, c1))
 
             for (r2, c2), v2 in df2.stack().items():
+                if (r2, c2) in processed_cells:
+                    continue
+                
                 cell2 = f'{get_column_letter(c2+1)}{r2+1}'
-                if all(str(v2).strip() != str(v).strip() for _, v in df1.stack().items()):
-                    function_id = df2.iloc[r2, 0] if c2 > 0 else v2
-                    function_name = function_details.get(function_id, {}).get('name', '')
-                    owner = function_details.get(function_id, {}).get('owner', '')
-                    ws_output.append([row_num, function_name, owner, sheet_name, '', '', cell2, v2, 'Cell value added'])
-                    for col in range(1, 10):
-                        ws_output.cell(row=row_num, column=col).fill = PatternFill(start_color=colors['Cell value added'], end_color=colors['Cell value added'], fill_type='solid')
-                    row_num += 1
+                function_id = df2.iloc[r2, 0] if c2 > 0 else v2
+                function_name = function_details.get(function_id, {}).get('name', '')
+                owner = function_details.get(function_id, {}).get('owner', '')
+                row_num += 1
+                ws_output.append([row_num, function_name, owner, sheet_name, '', '', cell2, v2, 'Cell value added'])
+                for col in range(1, 10):
+                    ws_output.cell(row=row_num, column=col).fill = PatternFill(start_color=colors['Cell value added'], end_color=colors['Cell value added'], fill_type='solid')
 
         else:
             for r, row in enumerate(ws1.iter_rows(), start=1):
@@ -130,10 +146,10 @@ def compare_excel_files(file1_path, file2_path, output_path):
                     function_id = ws1.cell(row=r, column=1).value
                     function_name = function_details.get(function_id, {}).get('name', '')
                     owner = function_details.get(function_id, {}).get('owner', '')
+                    row_num += 1
                     ws_output.append([row_num, function_name, owner, sheet_name, f'{get_column_letter(c)}{r}', cell.value, '', '', 'Cell value deleted'])
                     for col in range(1, 10):
                         ws_output.cell(row=row_num, column=col).fill = PatternFill(start_color=colors['Cell value deleted'], end_color=colors['Cell value deleted'], fill_type='solid')
-                    row_num += 1
 
     # Add color legends
     ws_output['K2'] = 'Color Legend'
