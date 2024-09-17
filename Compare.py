@@ -110,6 +110,8 @@ def compare_excel_files(file1_path, file2_path, output_path):
 
         processed_cells1 = set()
         processed_cells2 = set()
+        changed_cells1 = set()
+        changed_cells2 = set()
 
         for col in range(last_col1):
             hash_dict1 = {}
@@ -118,7 +120,8 @@ def compare_excel_files(file1_path, file2_path, output_path):
             for row in range(1, len(df1)):
                 if (row, col) in processed_cells1:
                     continue
-                values1 = [v for v in df1.iloc[row, :col+1].tolist() if pd.notna(v) and v != '']
+                values1 = [v for i, v in enumerate(df1.iloc[row, :col+1].tolist()) 
+                           if pd.notna(v) and v != '' and (row, i) not in changed_cells1]
                 if not values1:
                     continue
                 hash_key = create_hash(values1)
@@ -127,7 +130,8 @@ def compare_excel_files(file1_path, file2_path, output_path):
             for row in range(1, len(df2)):
                 if (row, col) in processed_cells2:
                     continue
-                values2 = [v for v in df2.iloc[row, :col+1].tolist() if pd.notna(v) and v != '']
+                values2 = [v for i, v in enumerate(df2.iloc[row, :col+1].tolist()) 
+                           if pd.notna(v) and v != '' and (row, i) not in changed_cells2]
                 if not values2:
                     continue
                 hash_key = create_hash(values2)
@@ -152,41 +156,14 @@ def compare_excel_files(file1_path, file2_path, output_path):
                     processed_cells2.add((row2, col))
                 else:
                     # Check for partial matches
-                    partial_hash = create_hash(df1.iloc[row1, :col].tolist())
-                    matches = [r for h, (r, _) in hash_dict2.items() if create_hash(df2.iloc[r, :col].tolist()) == partial_hash]
+                    partial_hash1 = create_hash([v for i, v in enumerate(df1.iloc[row1, :col].tolist()) 
+                                                 if (row1, i) not in changed_cells1])
+                    matches = [r for h, (r, _) in hash_dict2.items() 
+                               if create_hash([v for i, v in enumerate(df2.iloc[r, :col].tolist()) 
+                                               if (r, i) not in changed_cells2]) == partial_hash1]
                     if matches:
                         for match in matches:
                             change_type = compare_strings(df1.iloc[row1, col], df2.iloc[match, col])
-                            if change_type == 'Complete change':
-                                if row1 == match:
-                                    summary = "Complete change"
-                                else:
-                                    # Treat as deletion in source 1 and addition in source 2
-                                    row_num += 1
-                                    function_id = df1.iloc[row1, 0]
-                                    function_name = function_details.get(function_id, {}).get('name', '')
-                                    owner = function_details.get(function_id, {}).get('owner', '')
-                                    ws_output.append([row_num, function_name, owner, sheet_name, 
-                                                      f'{get_column_letter(col+1)}{row1+1}', df1.iloc[row1, col],
-                                                      '', '', 'Cell value deleted'])
-                                    for c in range(1, 10):
-                                        ws_output.cell(row=row_num+1, column=c).fill = PatternFill(start_color=colors['Cell value deleted'], end_color=colors['Cell value deleted'], fill_type='solid')
-                                    
-                                    row_num += 1
-                                    function_id = df2.iloc[match, 0]
-                                    function_name = function_details.get(function_id, {}).get('name', '')
-                                    owner = function_details.get(function_id, {}).get('owner', '')
-                                    ws_output.append([row_num, function_name, owner, sheet_name, 
-                                                      '', '',
-                                                      f'{get_column_letter(col+1)}{match+1}', df2.iloc[match, col],
-                                                      'Cell value added'])
-                                    for c in range(1, 10):
-                                        ws_output.cell(row=row_num+1, column=c).fill = PatternFill(start_color=colors['Cell value added'], end_color=colors['Cell value added'], fill_type='solid')
-                                    
-                                    processed_cells1.add((row1, col))
-                                    processed_cells2.add((match, col))
-                                    continue
-                            
                             if change_type != 'No change':
                                 row_num += 1
                                 function_id = df1.iloc[row1, 0]
@@ -201,6 +178,8 @@ def compare_excel_files(file1_path, file2_path, output_path):
                                                   summary])
                                 for c in range(1, 10):
                                     ws_output.cell(row=row_num+1, column=c).fill = PatternFill(start_color=colors[change_type], end_color=colors[change_type], fill_type='solid')
+                                changed_cells1.add((row1, col))
+                                changed_cells2.add((match, col))
                             processed_cells1.add((row1, col))
                             processed_cells2.add((match, col))
                     else:
@@ -214,6 +193,7 @@ def compare_excel_files(file1_path, file2_path, output_path):
                                           '', '', 'Cell value deleted'])
                         for c in range(1, 10):
                             ws_output.cell(row=row_num+1, column=c).fill = PatternFill(start_color=colors['Cell value deleted'], end_color=colors['Cell value deleted'], fill_type='solid')
+                        changed_cells1.add((row1, col))
                     processed_cells1.add((row1, col))
 
             # Check for added cells
@@ -229,6 +209,7 @@ def compare_excel_files(file1_path, file2_path, output_path):
                                       'Cell value added'])
                     for c in range(1, 10):
                         ws_output.cell(row=row_num+1, column=c).fill = PatternFill(start_color=colors['Cell value added'], end_color=colors['Cell value added'], fill_type='solid')
+                    changed_cells2.add((row2, col))
                     processed_cells2.add((row2, col))
 
     # Add color legends
