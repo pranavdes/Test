@@ -5,277 +5,533 @@ from openpyxl.utils import get_column_letter
 import os
 import hashlib
 from difflib import SequenceMatcher
-from collections import defaultdict
+import argparse
+import sys
+import logging
+from typing import Dict, List, Tuple
+from tqdm import tqdm
 
-def unmerge_cells(worksheet):
-    merged_ranges = list(worksheet.merged_cells.ranges)
-    for merged_range in merged_ranges:
-        worksheet.unmerge_cells(str(merged_range))
-        value = worksheet.cell(merged_range.min_row, merged_range.min_col).value
-        for row in range(merged_range.min_row, merged_range.max_row + 1):
-            for col in range(merged_range.min_col, merged_range.max_col + 1):
-                worksheet.cell(row, col, value)
+# Set up logging configuration to display messages with timestamp and level
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-def get_function_details(core_ocir_sheet):
+def unmerge_cells(worksheet: openpyxl.worksheet.worksheet.Worksheet) -> None:
+    """
+    Unmerge all merged cells in the worksheet and copy the merged value to each cell.
+    
+    Parameters:
+        worksheet (openpyxl.worksheet.worksheet.Worksheet): The worksheet to process.
+    """
+    try:
+        # Get a list of all merged cell ranges in the worksheet
+        merged_ranges = list(worksheet.merged_cells.ranges)
+        for merged_range in merged_ranges:
+            # Unmerge the cells in the merged range
+            worksheet.unmerge_cells(str(merged_range))
+            # Get the value from the top-left cell of the merged range
+            value = worksheet.cell(merged_range.min_row, merged_range.min_col).value
+            # Assign the value to each cell in the previously merged range
+            for row in range(merged_range.min_row, merged_range.max_row + 1):
+                for col in range(merged_range.min_col, merged_range.max_col + 1):
+                    worksheet.cell(row, col, value)
+    except Exception as e:
+        logger.error(f"Error in unmerging cells: {e}")
+        raise
+
+def get_function_details(
+    workbook: openpyxl.workbook.workbook.Workbook,
+    sheet_name: str,
+    key_column: str,
+    function_name_column: str,
+    owner_column: str
+) -> Dict[str, Dict[str, str]]:
+    """
+    Extract function details from the specified sheet in the workbook.
+    
+    Parameters:
+        workbook (openpyxl.workbook.workbook.Workbook): The workbook containing the data.
+        sheet_name (str): The name of the sheet to extract details from.
+        key_column (str): The column name to use as the key (e.g., 'Function ID').
+        function_name_column (str): The column name for the function name.
+        owner_column (str): The column name for the owner.
+    
+    Returns:
+        Dict[str, Dict[str, str]]: A dictionary mapping the key to function details.
+    """
     function_details = {}
-    for row in core_ocir_sheet.iter_rows(min_row=2, values_only=True):
-        if row[0]:  # Function ID
-            function_details[row[0]] = {'name': row[1], 'owner': row[3]}
+    try:
+        # Check if the specified sheet exists in the workbook
+        if sheet_name not in workbook.sheetnames:
+            logger.warning(f"Sheet '{sheet_name}' not found in workbook. Function details will be empty.")
+            return function_details
+        
+        # Get the worksheet by name
+        sheet = workbook[sheet_name]
+        # Extract the header row to identify column indices
+        headers = [cell.value for cell in sheet[1]]
+        
+        # Find the indices of the key, function name, and owner columns
+        key_index = headers.index(key_column) if key_column in headers else None
+        name_index = headers.index(function_name_column) if function_name_column in headers else None
+        owner_index = headers.index(owner_column) if owner_column in headers else None
+        
+        # If the key column is not found, log an error and return
+        if key_index is None:
+            logger.error(f"Key column '{key_column}' not found in sheet '{sheet_name}'.")
+            return function_details
+        
+        # Iterate over the rows starting from the second row (excluding headers)
+        for row in sheet.iter_rows(min_row=2, values_only=True):
+            # Get the key value from the row
+            key_value = row[key_index]
+            if key_value:
+                details = {}
+                # Get the function name if the index exists
+                details['name'] = row[name_index] if name_index is not None else ''
+                # Get the owner if the index exists
+                details['owner'] = row[owner_index] if owner_index is not None else ''
+                # Add the details to the function_details dictionary
+                function_details[key_value] = details
+    except Exception as e:
+        logger.error(f"Error in getting function details: {e}")
+        raise
     return function_details
 
-def create_hash(values):
-    return hashlib.md5(''.join(str(v) for v in values if pd.notna(v) and v != '').encode()).hexdigest()
+def compare_strings(s1: str, s2: str) -> float:
+    """
+    Compare two strings and return a similarity ratio using SequenceMatcher.
+    
+    Parameters:
+        s1 (str): The first string to compare.
+        s2 (str): The second string to compare.
+    
+    Returns:
+        float: A similarity ratio between 0 and 1.
+    """
+    # Normalize strings by stripping whitespace and converting to lowercase
+    s1 = str(s1).strip().lower()
+    s2 = str(s2).strip().lower()
+    # Compute the similarity ratio
+    return SequenceMatcher(None, s1, s2).ratio()
 
-def compare_strings(s1, s2):
-    return SequenceMatcher(None, str(s1), str(s2)).ratio()
+def compare_values(val1, val2) -> float:
+    """
+    Compare two values and return a similarity ratio, handling different data types appropriately.
+    
+    Parameters:
+        val1: The first value to compare.
+        val2: The second value to compare.
+    
+    Returns:
+        float: A similarity ratio between 0 and 1.
+    """
+    if pd.isna(val1) and pd.isna(val2):
+        # Both values are NaN or None, considered identical
+        return 1.0  # No change
+    elif pd.isna(val1) or pd.isna(val2):
+        # One value is NaN/None and the other is not, considered a complete change
+        return 0.0  # Complete change
+    elif isinstance(val1, str) and isinstance(val2, str):
+        # Both values are strings, compare using string similarity
+        return compare_strings(val1, val2)
+    elif isinstance(val1, (int, float, complex)) and isinstance(val2, (int, float, complex)):
+        # Both values are numeric, compare for equality
+        return 1.0 if val1 == val2 else 0.0
+    elif isinstance(val1, pd.Timestamp) and isinstance(val2, pd.Timestamp):
+        # Both values are timestamps, compare for equality
+        return 1.0 if val1 == val2 else 0.0
+    else:
+        # For other data types, convert to strings and compare
+        return compare_strings(str(val1), str(val2))
 
-def categorize_change(ratio):
+def categorize_change(ratio: float, minor_threshold: float, major_threshold: float) -> str:
+    """
+    Categorize the type of change based on the similarity ratio.
+    
+    Parameters:
+        ratio (float): The similarity ratio between 0 and 1.
+        minor_threshold (float): Threshold above which a change is considered minor.
+        major_threshold (float): Threshold above which a change is considered major.
+    
+    Returns:
+        str: The category of change ('No change', 'Minor change', 'Major change', 'Complete change').
+    """
     if ratio == 1:
         return 'No change'
-    elif ratio > 0.8:
+    elif ratio > minor_threshold:
         return 'Minor change'
-    elif ratio > 0.5:
+    elif ratio > major_threshold:
         return 'Major change'
     else:
         return 'Complete change'
 
-def get_last_column(sheet):
-    for col in range(1, sheet.max_column + 1):
-        if sheet.cell(row=1, column=col).value is None or sheet.cell(row=1, column=col).value == '':
-            return col - 1
-    return sheet.max_column
+def process_chunk(
+    chunk: pd.DataFrame,
+    minor_threshold: float,
+    major_threshold: float,
+    ignore_columns: List[str]
+) -> List[Tuple]:
+    """
+    Process a chunk of data and return a list of comparison results.
+    
+    Parameters:
+        chunk (pd.DataFrame): A chunk of the combined DataFrame to process.
+        minor_threshold (float): Threshold for minor changes.
+        major_threshold (float): Threshold for major changes.
+        ignore_columns (List[str]): List of column names to ignore during comparison.
+    
+    Returns:
+        List[Tuple]: A list of tuples containing comparison results.
+    """
+    results = []
+    # Iterate over each row in the chunk
+    for idx, row in chunk.iterrows():
+        function_id = idx  # The key value (e.g., Function ID)
+        merge_status = row['_merge']  # Indicates if the row is in both, left_only, or right_only
 
-def compare_excel_files(file1_path, file2_path, output_path):
-    wb1 = openpyxl.load_workbook(file1_path, data_only=True)
-    wb2 = openpyxl.load_workbook(file2_path, data_only=True)
+        if merge_status == 'both':
+            # Row exists in both dataframes
+            for col in chunk.columns:
+                if col in ['_merge']:
+                    continue  # Skip the _merge column
+                if col.endswith('_source1'):
+                    # Column from source1
+                    col_name = col[:-8]  # Remove '_source1' suffix to get the original column name
+                    if col_name in ignore_columns:
+                        continue  # Skip ignored columns
+                    val1 = row[col]
+                    val2 = row.get(f"{col_name}_source2", None)  # Get the corresponding value from source2
+                    
+                    if pd.isna(val1) and pd.isna(val2):
+                        continue  # No change if both values are NaN
+                    elif pd.isna(val1) and pd.notna(val2):
+                        # Value added in source2
+                        results.append((function_id, '', '', col_name, val2, 'Cell value added'))
+                    elif pd.notna(val1) and pd.isna(val2):
+                        # Value deleted in source2
+                        results.append((function_id, col_name, val1, '', '', 'Cell value deleted'))
+                    else:
+                        # Compare the two values
+                        ratio = compare_values(val1, val2)
+                        change_type = categorize_change(ratio, minor_threshold, major_threshold)
+                        if change_type != 'No change':
+                            results.append((function_id, col_name, val1, col_name, val2, change_type))
+        elif merge_status == 'left_only':
+            # Row only exists in source1 (deleted in source2)
+            for col in chunk.columns:
+                if col.endswith('_source1'):
+                    col_name = col[:-8]
+                    if col_name in ignore_columns:
+                        continue
+                    val1 = row[col]
+                    if pd.notna(val1):
+                        results.append((function_id, col_name, val1, '', '', 'Cell value deleted'))
+        elif merge_status == 'right_only':
+            # Row only exists in source2 (added in source2)
+            for col in chunk.columns:
+                if col.endswith('_source2'):
+                    col_name = col[:-8]
+                    if col_name in ignore_columns:
+                        continue
+                    val2 = row[col]
+                    if pd.notna(val2):
+                        results.append((function_id, '', '', col_name, val2, 'Cell value added'))
+    return results
+
+def compare_excel_files(
+    file1_path: str,
+    file2_path: str,
+    output_path: str,
+    key_column: str,
+    function_name_column: str,
+    owner_column: str,
+    minor_threshold: float,
+    major_threshold: float,
+    chunk_size: int,
+    ignore_columns: List[str],
+    ignore_sheets: List[str],
+    disable_progress: bool
+) -> None:
+    """
+    Main function to compare two Excel files and generate a comparison report.
+    
+    Parameters:
+        file1_path (str): Path to the first Excel file.
+        file2_path (str): Path to the second Excel file.
+        output_path (str): Path to save the output Excel file.
+        key_column (str): Column name used as the key to align rows.
+        function_name_column (str): Column name for function name.
+        owner_column (str): Column name for owner.
+        minor_threshold (float): Threshold for minor changes.
+        major_threshold (float): Threshold for major changes.
+        chunk_size (int): Number of rows to process at a time.
+        ignore_columns (List[str]): Columns to ignore during comparison.
+        ignore_sheets (List[str]): Sheets to ignore during comparison.
+        disable_progress (bool): Whether to disable the progress bar.
+    """
+    try:
+        # Load the Excel workbooks using openpyxl
+        wb1 = openpyxl.load_workbook(file1_path, data_only=True)
+        wb2 = openpyxl.load_workbook(file2_path, data_only=True)
+    except Exception as e:
+        logger.error(f"Error loading workbooks: {e}")
+        sys.exit(1)
+
+    # Create a new workbook for the output report
     wb_output = openpyxl.Workbook()
     ws_output = wb_output.active
     ws_output.title = 'Comparison'
 
+    # Define colors for different types of changes
     colors = {
-        'Cell value added': 'C6EFCE',
-        'Cell value deleted': 'FFC7CE',
-        'Minor change': 'FFEB9C',
-        'Major change': 'FFD966',
-        'Complete change': 'F4B084',
-        'Cell value moved': 'D9E1F2',
-        'Structure mismatch': 'FF0000'
+        'Cell value added': 'C6EFCE',     # Light green
+        'Cell value deleted': 'FFC7CE',   # Light red
+        'Minor change': 'FFEB9C',         # Light yellow
+        'Major change': 'FFD966',         # Orange
+        'Complete change': 'F4B084',      # Light orange
+        'Cell value moved': 'D9E1F2',     # Light blue
+        'No change': 'FFFFFF',            # White
+        'Structure mismatch': 'FF0000'    # Red
     }
 
-    source1_name = os.path.splitext(os.path.basename(file1_path))[0].split(' - ')[-1]
-    source2_name = os.path.splitext(os.path.basename(file2_path))[0].split(' - ')[-1]
-
-    # Set up header
-    headers = ['Sr. No', 'Function Name', 'Owner', 'Sheet Name', 
-               f'{source1_name} Source Cell', f'{source1_name} Cell Value',
-               f'{source2_name} Source Cell', f'{source2_name} Cell Value',
+    # Set up the header row in the output worksheet
+    headers = ['Sr. No', 'Function Name', 'Owner', 'Sheet Name',
+               'Source 1 Column', 'Source 1 Value',
+               'Source 2 Column', 'Source 2 Value',
                'Change Summary']
     ws_output.append(headers)
+
+    # Format the header row with styles
     for col in range(1, len(headers) + 1):
         cell = ws_output.cell(row=1, column=col)
-        cell.font = Font(bold=True, color='000000')
-        cell.fill = PatternFill(start_color='BDD7EE', end_color='BDD7EE', fill_type='solid')
-        cell.alignment = Alignment(horizontal='center', vertical='center')
+        cell.font = Font(bold=True, color='000000')  # Bold font
+        cell.fill = PatternFill(start_color='BDD7EE', end_color='BDD7EE', fill_type='solid')  # Light blue background
+        cell.alignment = Alignment(horizontal='center', vertical='center')  # Center alignment
 
-    row_num = 0
+    # Add source file details to the output worksheet
+    ws_output['L2'] = 'Source 1:'
+    ws_output['M2'] = os.path.basename(file1_path)  # File name of the first source
+    ws_output['L3'] = 'Source 2:'
+    ws_output['M3'] = os.path.basename(file2_path)  # File name of the second source
 
-    # Check if both files have the same sheets
+    row_num = 1  # Initialize row number (header is in row 1)
+
+    # Check if both workbooks have the same sheets
     if set(wb1.sheetnames) != set(wb2.sheetnames):
         row_num += 1
+        # Add a note about sheet structure mismatch
         ws_output.append([row_num, '', '', '', '', '', '', '', 'Sheet structure mismatch'])
+        # Apply red fill to indicate structure mismatch
         for col in range(1, 10):
-            ws_output.cell(row=row_num+1, column=col).fill = PatternFill(start_color=colors['Structure mismatch'], end_color=colors['Structure mismatch'], fill_type='solid')
+            ws_output.cell(row=row_num, column=col).fill = PatternFill(
+                start_color=colors['Structure mismatch'],
+                end_color=colors['Structure mismatch'],
+                fill_type='solid'
+            )
 
-    function_details = get_function_details(wb1['Core OCIR Data'])
+    # Get function details from a specific sheet (e.g., 'Core OCIR Data')
+    try:
+        function_details_sheet = 'Core OCIR Data'  # Modify if the sheet name is different
+        # Extract function details from both workbooks
+        function_details1 = get_function_details(wb1, function_details_sheet, key_column, function_name_column, owner_column)
+        function_details2 = get_function_details(wb2, function_details_sheet, key_column, function_name_column, owner_column)
+        # Merge the dictionaries, with values from the second workbook overwriting the first in case of duplicate keys
+        function_details = {**function_details1, **function_details2}
+    except Exception as e:
+        logger.error(f"Error getting function details: {e}")
+        function_details = {}
 
-    for sheet_name in wb1.sheetnames:
-        if sheet_name not in wb2.sheetnames:
+    # Initialize a dictionary to keep track of change counts
+    change_summary = defaultdict(int)
+
+    # Iterate through each sheet in the first workbook
+    for sheet_name in tqdm(wb1.sheetnames, desc="Processing sheets", disable=disable_progress):
+        # Skip sheets that are in the ignore list or not present in both workbooks
+        if sheet_name in ignore_sheets or sheet_name not in wb2.sheetnames:
             continue
 
+        # Get the corresponding worksheets from both workbooks
         ws1 = wb1[sheet_name]
         ws2 = wb2[sheet_name]
 
+        # Unmerge cells in both worksheets to ensure consistent data
         unmerge_cells(ws1)
         unmerge_cells(ws2)
 
-        last_col1 = get_last_column(ws1)
-        last_col2 = get_last_column(ws2)
+        # Read data from the worksheets into DataFrames
+        data1 = ws1.values  # Generator for rows in ws1
+        cols1 = next(data1)  # First row contains column headers
+        df1 = pd.DataFrame(data1, columns=cols1)  # Create DataFrame for ws1
 
-        if last_col1 != last_col2:
-            row_num += 1
-            ws_output.append([row_num, '', '', sheet_name, '', '', '', '', f'Column count mismatch: {last_col1} vs {last_col2}'])
-            for col in range(1, 10):
-                ws_output.cell(row=row_num+1, column=col).fill = PatternFill(start_color=colors['Structure mismatch'], end_color=colors['Structure mismatch'], fill_type='solid')
+        data2 = ws2.values  # Generator for rows in ws2
+        cols2 = next(data2)  # First row contains column headers
+        df2 = pd.DataFrame(data2, columns=cols2)  # Create DataFrame for ws2
+
+        # Remove columns to ignore from both DataFrames
+        df1 = df1.drop(columns=ignore_columns, errors='ignore')
+        df2 = df2.drop(columns=ignore_columns, errors='ignore')
+
+        # Ensure that the key column exists in both DataFrames
+        if key_column not in df1.columns or key_column not in df2.columns:
+            logger.warning(f"Key column '{key_column}' not found in sheet '{sheet_name}'. Skipping this sheet.")
             continue
 
-        df1 = pd.DataFrame(ws1.values)
-        df2 = pd.DataFrame(ws2.values)
+        # Set the key column as the index for alignment
+        df1.set_index(key_column, inplace=True)
+        df2.set_index(key_column, inplace=True)
 
-        processed_cells1 = set()
-        processed_cells2 = set()
-        changed_cells1 = set()
-        changed_cells2 = set()
+        # Merge the DataFrames on the index (key column), including an indicator for merge status
+        combined_df = df1.merge(df2, how='outer', left_index=True, right_index=True,
+                                suffixes=('_source1', '_source2'), indicator=True)
 
-        for col in range(last_col1):
-            hash_dict1 = defaultdict(list)
-            hash_dict2 = defaultdict(list)
+        # Process the combined DataFrame in chunks to handle large datasets efficiently
+        for i in range(0, len(combined_df), chunk_size):
+            chunk = combined_df.iloc[i:i+chunk_size]  # Get a chunk of rows
+            results = process_chunk(chunk, minor_threshold, major_threshold, ignore_columns)  # Process the chunk
+            
+            # Iterate over the results and write them to the output worksheet
+            for result in results:
+                function_id, col1, val1, col2, val2, change_type = result
+                # Retrieve function name and owner using the function ID
+                function_name = function_details.get(function_id, {}).get('name', '')
+                owner = function_details.get(function_id, {}).get('owner', '')
+                
+                row_num += 1  # Increment the row number for each result
+                # Append the comparison result to the worksheet
+                ws_output.append([row_num, function_name, owner, sheet_name,
+                                  col1, val1, col2, val2, change_type])
+                # Apply color formatting based on the type of change
+                for c in range(1, 10):
+                    ws_output.cell(row=row_num, column=c).fill = PatternFill(
+                        start_color=colors[change_type],
+                        end_color=colors[change_type],
+                        fill_type='solid'
+                    )
+                # Update the change summary count
+                change_summary[change_type] += 1
 
-            for row in range(1, len(df1)):
-                if (row, col) in processed_cells1:
-                    continue
-                values1 = [v for i, v in enumerate(df1.iloc[row, :col+1].tolist()) 
-                           if pd.notna(v) and v != '' and (row, i) not in changed_cells1]
-                if not values1:
-                    continue
-                hash_key = create_hash(values1)
-                hash_dict1[hash_key].append((row, col))
-
-            for row in range(1, len(df2)):
-                if (row, col) in processed_cells2:
-                    continue
-                values2 = [v for i, v in enumerate(df2.iloc[row, :col+1].tolist()) 
-                           if pd.notna(v) and v != '' and (row, i) not in changed_cells2]
-                if not values2:
-                    continue
-                hash_key = create_hash(values2)
-                hash_dict2[hash_key].append((row, col))
-
-            for hash_key, positions1 in hash_dict1.items():
-                if hash_key in hash_dict2:
-                    for row1, _ in positions1:
-                        for row2, _ in hash_dict2[hash_key]:
-                            if df1.iloc[row1, col] == df2.iloc[row2, col]:
-                                if row1 != row2:
-                                    # Cell moved
-                                    row_num += 1
-                                    function_id = df1.iloc[row1, 0]
-                                    function_name = function_details.get(function_id, {}).get('name', '')
-                                    owner = function_details.get(function_id, {}).get('owner', '')
-                                    ws_output.append([row_num, function_name, owner, sheet_name, 
-                                                      f'{get_column_letter(col+1)}{row1+1}', df1.iloc[row1, col],
-                                                      f'{get_column_letter(col+1)}{row2+1}', df2.iloc[row2, col],
-                                                      'Cell value moved'])
-                                    for c in range(1, 10):
-                                        ws_output.cell(row=row_num+1, column=c).fill = PatternFill(start_color=colors['Cell value moved'], end_color=colors['Cell value moved'], fill_type='solid')
-                                processed_cells1.add((row1, col))
-                                processed_cells2.add((row2, col))
-                else:
-                    for row1, _ in positions1:
-                        if (row1, col) in processed_cells1:
-                            continue
-                        # Check for partial matches
-                        partial_hash1 = create_hash([v for i, v in enumerate(df1.iloc[row1, :col].tolist()) 
-                                                     if (row1, i) not in changed_cells1])
-                        matches1 = [r for h, positions in hash_dict1.items() for r, _ in positions
-                                    if create_hash([v for i, v in enumerate(df1.iloc[r, :col].tolist()) 
-                                                    if (r, i) not in changed_cells1]) == partial_hash1]
-                        matches2 = [r for h, positions in hash_dict2.items() for r, _ in positions
-                                    if create_hash([v for i, v in enumerate(df2.iloc[r, :col].tolist()) 
-                                                    if (r, i) not in changed_cells2]) == partial_hash1]
-                        
-                        if matches2:
-                            comparisons = []
-                            for match1 in matches1:
-                                for match2 in matches2:
-                                    ratio = compare_strings(df1.iloc[match1, col], df2.iloc[match2, col])
-                                    comparisons.append((match1, match2, ratio))
-                            
-                            comparisons.sort(key=lambda x: x[2], reverse=True)
-                            
-                            for match1, match2, ratio in comparisons:
-                                if (match1, col) not in processed_cells1 and (match2, col) not in processed_cells2:
-                                    change_type = categorize_change(ratio)
-                                    if change_type != 'No change':
-                                        row_num += 1
-                                        function_id = df1.iloc[match1, 0]
-                                        function_name = function_details.get(function_id, {}).get('name', '')
-                                        owner = function_details.get(function_id, {}).get('owner', '')
-                                        summary = f"{change_type}"
-                                        if match1 != match2:
-                                            summary += " and Cell value moved"
-                                        ws_output.append([row_num, function_name, owner, sheet_name, 
-                                                          f'{get_column_letter(col+1)}{match1+1}', df1.iloc[match1, col],
-                                                          f'{get_column_letter(col+1)}{match2+1}', df2.iloc[match2, col],
-                                                          summary])
-                                        for c in range(1, 10):
-                                            ws_output.cell(row=row_num+1, column=c).fill = PatternFill(start_color=colors[change_type], end_color=colors[change_type], fill_type='solid')
-                                    processed_cells1.add((match1, col))
-                                    processed_cells2.add((match2, col))
-                                    changed_cells1.add((match1, col))
-                                    changed_cells2.add((match2, col))
-                                    break
-                            
-                            if (row1, col) not in processed_cells1:
-                                # Cell deleted
-                                row_num += 1
-                                function_id = df1.iloc[row1, 0]
-                                function_name = function_details.get(function_id, {}).get('name', '')
-                                owner = function_details.get(function_id, {}).get('owner', '')
-                                ws_output.append([row_num, function_name, owner, sheet_name, 
-                                                  f'{get_column_letter(col+1)}{row1+1}', df1.iloc[row1, col],
-                                                  '', '', 'Cell value deleted'])
-                                for c in range(1, 10):
-                                    ws_output.cell(row=row_num+1, column=c).fill = PatternFill(start_color=colors['Cell value deleted'], end_color=colors['Cell value deleted'], fill_type='solid')
-                                changed_cells1.add((row1, col))
-                                processed_cells1.add((row1, col))
-                        else:
-                            # Cell deleted
-                            row_num += 1
-                            function_id = df1.iloc[row1, 0]
-                            function_name = function_details.get(function_id, {}).get('name', '')
-                            owner = function_details.get(function_id, {}).get('owner', '')
-                            ws_output.append([row_num, function_name, owner, sheet_name, 
-                                              f'{get_column_letter(col+1)}{row1+1}', df1.iloc[row1, col],
-                                              '', '', 'Cell value deleted'])
-                            for c in range(1, 10):
-                                ws_output.cell(row=row_num+1, column=c).fill = PatternFill(start_color=colors['Cell value deleted'], end_color=colors['Cell value deleted'], fill_type='solid')
-                            changed_cells1.add((row1, col))
-                            processed_cells1.add((row1, col))
-
-            # Check for added cells
-            for hash_key, positions2 in hash_dict2.items():
-                for row2, _ in positions2:
-                    if (row2, col) not in processed_cells2:
-                        row_num += 1
-                        function_id = df2.iloc[row2, 0]
-                        function_name = function_details.get(function_id, {}).get('name', '')
-                        owner = function_details.get(function_id, {}).get('owner', '')
-                        ws_output.append([row_num, function_name, owner, sheet_name, 
-                                          '', '',
-                                          f'{get_column_letter(col+1)}{row2+1}', df2.iloc[row2, col],
-                                          'Cell value added'])
-                        for c in range(1, 10):
-                            ws_output.cell(row=row_num+1, column=c).fill = PatternFill(start_color=colors['Cell value added'], end_color=colors['Cell value added'], fill_type='solid')
-                        changed_cells2.add((row2, col))
-                        processed_cells2.add((row2, col))
-
-    # Add color legends
+    # Add a color legend to the output worksheet for reference
     ws_output['K2'] = 'Color Legend'
     ws_output['K2'].font = Font(bold=True)
     for i, (change_type, color) in enumerate(colors.items(), start=3):
         cell = ws_output.cell(row=i, column=11, value=change_type)
         cell.fill = PatternFill(start_color=color, end_color=color, fill_type='solid')
-        cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+        cell.border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
 
-    # Adjust column widths
+    # Add the change summary to the output worksheet
+    ws_output['K15'] = 'Change Summary'
+    ws_output['K15'].font = Font(bold=True)
+    for i, (change_type, count) in enumerate(change_summary.items(), start=16):
+        ws_output.cell(row=i, column=11, value=f"{change_type}: {count}")
 
-    # Adjust column widths
+    # Adjust the column widths for better readability in the output worksheet
     for col in ws_output.columns:
         max_length = 0
-        column = col[0].column_letter
+        column = col[0].column_letter  # Get the column letter (e.g., 'A', 'B', ...)
         for cell in col:
             try:
-                if len(str(cell.value)) > max_length:
-                    max_length = len(cell.value)
+                if cell.value and len(str(cell.value)) > max_length:
+                    max_length = len(str(cell.value))  # Update max_length if current cell's content is longer
             except:
                 pass
-        adjusted_width = (max_length + 2)
-        ws_output.column_dimensions[column].width = adjusted_width
+        adjusted_width = min((max_length + 2), 100)  # Set a maximum width to avoid excessively wide columns
+        ws_output.column_dimensions[column].width = adjusted_width  # Set the column width
 
-    wb_output.save(output_path)
+    # Save the output workbook to the specified file
+    try:
+        wb_output.save(output_path)
+        logger.info(f"Comparison report saved to {output_path}")
+    except Exception as e:
+        logger.error(f"Error saving the output workbook: {e}")
+        sys.exit(1)
 
-# Usage
-file1_path = 'path/to/Report - Apr\'24.xlsx'
-file2_path = 'path/to/Report - Jun\'24.xlsx'
-output_path = 'path/to/output.xlsx'
-compare_excel_files(file1_path, file2_path, output_path)
+def main():
+    """
+    Main function to handle command-line arguments and initiate the comparison process.
+    """
+    # Set up the argument parser to handle command-line inputs
+    parser = argparse.ArgumentParser(description='Compare two Excel files and generate a comparison report.')
+    parser.add_argument('-f1', '--file1', type=str, help='Path to the first Excel file.')
+    parser.add_argument('-f2', '--file2', type=str, help='Path to the second Excel file.')
+    parser.add_argument('-o', '--output', type=str, help='Path to the output Excel file.')
+    parser.add_argument('-k', '--key_column', type=str, default='Function ID', help='Name of the key column to align rows.')
+    parser.add_argument('-fn', '--function_name_column', type=str, default='Function Name', help='Name of the function name column.')
+    parser.add_argument('-own', '--owner_column', type=str, default='Owner', help='Name of the owner column.')
+    parser.add_argument('-mth', '--minor_threshold', type=float, default=0.8, help='Threshold for minor changes (default: 0.8).')
+    parser.add_argument('-majth', '--major_threshold', type=float, default=0.5, help='Threshold for major changes (default: 0.5).')
+    parser.add_argument('-cs', '--chunk_size', type=int, default=10000, help='Number of rows to process at a time (default: 10000).')
+    parser.add_argument('-ic', '--ignore_columns', nargs='*', default=[], help='Columns to ignore during comparison.')
+    parser.add_argument('-is', '--ignore_sheets', nargs='*', default=[], help='Sheets to ignore during comparison.')
+    parser.add_argument('--no-progress', action='store_true', help='Disable progress bars.')
+    parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose logging.')
+
+    # Parse the command-line arguments
+    args = parser.parse_args()
+
+    # Set logging level to DEBUG if verbose flag is provided
+    if args.verbose:
+        logger.setLevel(logging.DEBUG)
+
+    # Validate the similarity thresholds to ensure they are between 0 and 1
+    if not 0 <= args.minor_threshold <= 1 or not 0 <= args.major_threshold <= 1:
+        logger.error("Thresholds must be between 0 and 1.")
+        sys.exit(1)
+    # Ensure that the minor threshold is greater than the major threshold
+    if args.minor_threshold <= args.major_threshold:
+        logger.error("Minor threshold must be greater than major threshold.")
+        sys.exit(1)
+
+    # Set default file paths if not provided
+    file1_path = args.file1 or 'Report - Apr\'24.xlsx'
+    file2_path = args.file2 or 'Report - Jun\'24.xlsx'
+    output_path = args.output or 'output.xlsx'
+
+    # Validate that the specified files exist
+    if not os.path.exists(file1_path):
+        logger.error(f"File not found: {file1_path}")
+        sys.exit(1)
+    if not os.path.exists(file2_path):
+        logger.error(f"File not found: {file2_path}")
+        sys.exit(1)
+
+    # Log the configurations being used
+    logger.info(f"Comparing {file1_path} and {file2_path}")
+    logger.info(f"Output will be saved to {output_path}")
+    logger.info(f"Using key column: {args.key_column}")
+    logger.info(f"Minor change threshold: {args.minor_threshold}")
+    logger.info(f"Major change threshold: {args.major_threshold}")
+    logger.info(f"Chunk size: {args.chunk_size}")
+    if args.ignore_columns:
+        logger.info(f"Ignoring columns: {', '.join(args.ignore_columns)}")
+    if args.ignore_sheets:
+        logger.info(f"Ignoring sheets: {', '.join(args.ignore_sheets)}")
+
+    try:
+        # Call the main comparison function with the provided arguments
+        compare_excel_files(
+            file1_path=file1_path,
+            file2_path=file2_path,
+            output_path=output_path,
+            key_column=args.key_column,
+            function_name_column=args.function_name_column,
+            owner_column=args.owner_column,
+            minor_threshold=args.minor_threshold,
+            major_threshold=args.major_threshold,
+            chunk_size=args.chunk_size,
+            ignore_columns=args.ignore_columns,
+            ignore_sheets=args.ignore_sheets,
+            disable_progress=args.no_progress
+        )
+        logger.info("Comparison completed successfully.")
+    except Exception as e:
+        logger.error(f"An error occurred during comparison: {e}")
+        sys.exit(1)
+
+# Entry point of the script
+if __name__ == '__main__':
+    main()
