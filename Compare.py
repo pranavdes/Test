@@ -5,6 +5,7 @@ from openpyxl.utils import get_column_letter
 import os
 import hashlib
 from difflib import SequenceMatcher
+from collections import defaultdict  # Import defaultdict for change_summary
 import argparse
 import sys
 import logging
@@ -18,7 +19,7 @@ logger = logging.getLogger(__name__)
 def unmerge_cells(worksheet: openpyxl.worksheet.worksheet.Worksheet) -> None:
     """
     Unmerge all merged cells in the worksheet and copy the merged value to each cell.
-    
+
     Parameters:
         worksheet (openpyxl.worksheet.worksheet.Worksheet): The worksheet to process.
     """
@@ -47,14 +48,14 @@ def get_function_details(
 ) -> Dict[str, Dict[str, str]]:
     """
     Extract function details from the specified sheet in the workbook.
-    
+
     Parameters:
         workbook (openpyxl.workbook.workbook.Workbook): The workbook containing the data.
         sheet_name (str): The name of the sheet to extract details from.
         key_column (str): The column name to use as the key (e.g., 'Function ID').
         function_name_column (str): The column name for the function name.
         owner_column (str): The column name for the owner.
-    
+
     Returns:
         Dict[str, Dict[str, str]]: A dictionary mapping the key to function details.
     """
@@ -100,11 +101,11 @@ def get_function_details(
 def compare_strings(s1: str, s2: str) -> float:
     """
     Compare two strings and return a similarity ratio using SequenceMatcher.
-    
+
     Parameters:
         s1 (str): The first string to compare.
         s2 (str): The second string to compare.
-    
+
     Returns:
         float: A similarity ratio between 0 and 1.
     """
@@ -117,14 +118,23 @@ def compare_strings(s1: str, s2: str) -> float:
 def compare_values(val1, val2) -> float:
     """
     Compare two values and return a similarity ratio, handling different data types appropriately.
-    
+
     Parameters:
         val1: The first value to compare.
         val2: The second value to compare.
-    
+
     Returns:
         float: A similarity ratio between 0 and 1.
     """
+    # Ensure val1 and val2 are scalar values, not Series
+    if isinstance(val1, pd.Series):
+        val1 = val1.iloc[0]
+    if isinstance(val2, pd.Series):
+        val2 = val2.iloc[0]
+
+    # Debug statements (uncomment for detailed logging)
+    # logger.debug(f"Comparing values: val1={val1} (type: {type(val1)}), val2={val2} (type: {type(val2)})")
+    
     if pd.isna(val1) and pd.isna(val2):
         # Both values are NaN or None, considered identical
         return 1.0  # No change
@@ -134,8 +144,8 @@ def compare_values(val1, val2) -> float:
     elif isinstance(val1, str) and isinstance(val2, str):
         # Both values are strings, compare using string similarity
         return compare_strings(val1, val2)
-    elif isinstance(val1, (int, float, complex)) and isinstance(val2, (int, float, complex)):
-        # Both values are numeric, compare for equality
+    elif isinstance(val1, (int, float, complex, bool)) and isinstance(val2, (int, float, complex, bool)):
+        # Both values are numeric or boolean, compare for equality
         return 1.0 if val1 == val2 else 0.0
     elif isinstance(val1, pd.Timestamp) and isinstance(val2, pd.Timestamp):
         # Both values are timestamps, compare for equality
@@ -147,12 +157,12 @@ def compare_values(val1, val2) -> float:
 def categorize_change(ratio: float, minor_threshold: float, major_threshold: float) -> str:
     """
     Categorize the type of change based on the similarity ratio.
-    
+
     Parameters:
         ratio (float): The similarity ratio between 0 and 1.
         minor_threshold (float): Threshold above which a change is considered minor.
         major_threshold (float): Threshold above which a change is considered major.
-    
+
     Returns:
         str: The category of change ('No change', 'Minor change', 'Major change', 'Complete change').
     """
@@ -173,13 +183,13 @@ def process_chunk(
 ) -> List[Tuple]:
     """
     Process a chunk of data and return a list of comparison results.
-    
+
     Parameters:
         chunk (pd.DataFrame): A chunk of the combined DataFrame to process.
         minor_threshold (float): Threshold for minor changes.
         major_threshold (float): Threshold for major changes.
         ignore_columns (List[str]): List of column names to ignore during comparison.
-    
+
     Returns:
         List[Tuple]: A list of tuples containing comparison results.
     """
@@ -191,39 +201,45 @@ def process_chunk(
 
         if merge_status == 'both':
             # Row exists in both dataframes
-            for col in chunk.columns:
-                if col in ['_merge']:
-                    continue  # Skip the _merge column
-                if col.endswith('_source1'):
-                    # Column from source1
-                    col_name = col[:-8]  # Remove '_source1' suffix to get the original column name
-                    if col_name in ignore_columns:
-                        continue  # Skip ignored columns
-                    val1 = row[col]
-                    val2 = row.get(f"{col_name}_source2", None)  # Get the corresponding value from source2
-                    
-                    if pd.isna(val1) and pd.isna(val2):
-                        continue  # No change if both values are NaN
-                    elif pd.isna(val1) and pd.notna(val2):
-                        # Value added in source2
-                        results.append((function_id, '', '', col_name, val2, 'Cell value added'))
-                    elif pd.notna(val1) and pd.isna(val2):
-                        # Value deleted in source2
-                        results.append((function_id, col_name, val1, '', '', 'Cell value deleted'))
-                    else:
-                        # Compare the two values
-                        ratio = compare_values(val1, val2)
-                        change_type = categorize_change(ratio, minor_threshold, major_threshold)
-                        if change_type != 'No change':
-                            results.append((function_id, col_name, val1, col_name, val2, change_type))
+            # Get the list of base column names (without suffixes)
+            columns = set([col[:-8] for col in chunk.columns if col.endswith('_source1')])
+            for col_name in columns:
+                if col_name in ignore_columns or col_name == '_merge':
+                    continue  # Skip ignored columns and '_merge' column
+                col1 = f"{col_name}_source1"  # Column name in source1
+                col2 = f"{col_name}_source2"  # Corresponding column name in source2
+                val1 = row[col1] if col1 in row else None  # Value from source1
+                val2 = row[col2] if col2 in row else None  # Value from source2
+                # Ensure val1 and val2 are scalar values
+                if isinstance(val1, pd.Series):
+                    val1 = val1.iloc[0]
+                if isinstance(val2, pd.Series):
+                    val2 = val2.iloc[0]
+                if pd.isna(val1) and pd.isna(val2):
+                    continue  # No change if both values are NaN
+                elif pd.isna(val1) and pd.notna(val2):
+                    # Value added in source2
+                    results.append((function_id, '', '', col_name, val2, 'Cell value added'))
+                elif pd.notna(val1) and pd.isna(val2):
+                    # Value deleted in source2
+                    results.append((function_id, col_name, val1, '', '', 'Cell value deleted'))
+                else:
+                    # Compare the two values
+                    ratio = compare_values(val1, val2)
+                    change_type = categorize_change(ratio, minor_threshold, major_threshold)
+                    if change_type != 'No change':
+                        results.append((function_id, col_name, val1, col_name, val2, change_type))
         elif merge_status == 'left_only':
             # Row only exists in source1 (deleted in source2)
             for col in chunk.columns:
                 if col.endswith('_source1'):
                     col_name = col[:-8]
-                    if col_name in ignore_columns:
+                    if col_name in ignore_columns or col_name == '_merge':
                         continue
                     val1 = row[col]
+                    # Ensure val1 is a scalar value
+                    if isinstance(val1, pd.Series):
+                        val1 = val1.iloc[0]
                     if pd.notna(val1):
                         results.append((function_id, col_name, val1, '', '', 'Cell value deleted'))
         elif merge_status == 'right_only':
@@ -231,9 +247,12 @@ def process_chunk(
             for col in chunk.columns:
                 if col.endswith('_source2'):
                     col_name = col[:-8]
-                    if col_name in ignore_columns:
+                    if col_name in ignore_columns or col_name == '_merge':
                         continue
                     val2 = row[col]
+                    # Ensure val2 is a scalar value
+                    if isinstance(val2, pd.Series):
+                        val2 = val2.iloc[0]
                     if pd.notna(val2):
                         results.append((function_id, '', '', col_name, val2, 'Cell value added'))
     return results
@@ -254,7 +273,7 @@ def compare_excel_files(
 ) -> None:
     """
     Main function to compare two Excel files and generate a comparison report.
-    
+
     Parameters:
         file1_path (str): Path to the first Excel file.
         file2_path (str): Path to the second Excel file.
@@ -289,7 +308,7 @@ def compare_excel_files(
         'Minor change': 'FFEB9C',         # Light yellow
         'Major change': 'FFD966',         # Orange
         'Complete change': 'F4B084',      # Light orange
-        'Cell value moved': 'D9E1F2',     # Light blue
+        'Cell value moved': 'D9E1F2',     # Light blue (not used in current code)
         'No change': 'FFFFFF',            # White
         'Structure mismatch': 'FF0000'    # Red
     }
@@ -371,14 +390,23 @@ def compare_excel_files(
         df1 = df1.drop(columns=ignore_columns, errors='ignore')
         df2 = df2.drop(columns=ignore_columns, errors='ignore')
 
+        # Strip whitespace from column names and make them lowercase for consistency
+        df1.columns = df1.columns.str.strip().str.lower()
+        df2.columns = df2.columns.str.strip().str.lower()
+
+        # Also strip whitespace from key_column and other important columns
+        key_column_clean = key_column.strip().lower()
+        df1.rename(columns={key_column.strip().lower(): key_column_clean}, inplace=True)
+        df2.rename(columns={key_column.strip().lower(): key_column_clean}, inplace=True)
+
         # Ensure that the key column exists in both DataFrames
-        if key_column not in df1.columns or key_column not in df2.columns:
+        if key_column_clean not in df1.columns or key_column_clean not in df2.columns:
             logger.warning(f"Key column '{key_column}' not found in sheet '{sheet_name}'. Skipping this sheet.")
             continue
 
         # Set the key column as the index for alignment
-        df1.set_index(key_column, inplace=True)
-        df2.set_index(key_column, inplace=True)
+        df1.set_index(key_column_clean, inplace=True)
+        df2.set_index(key_column_clean, inplace=True)
 
         # Merge the DataFrames on the index (key column), including an indicator for merge status
         combined_df = df1.merge(df2, how='outer', left_index=True, right_index=True,
@@ -393,8 +421,9 @@ def compare_excel_files(
             for result in results:
                 function_id, col1, val1, col2, val2, change_type = result
                 # Retrieve function name and owner using the function ID
-                function_name = function_details.get(function_id, {}).get('name', '')
-                owner = function_details.get(function_id, {}).get('owner', '')
+                function_details_key = function_id
+                function_name = function_details.get(function_details_key, {}).get('name', '')
+                owner = function_details.get(function_details_key, {}).get('owner', '')
                 
                 row_num += 1  # Increment the row number for each result
                 # Append the comparison result to the worksheet
