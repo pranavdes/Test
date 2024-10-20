@@ -1,5 +1,5 @@
 AJS.toInit(function($) {
-    console.log("Robust Ownership & Scope table formatter script initialized");
+    console.log("Refined Ownership & Scope table formatter script initialized");
 
     const TABLE_ID = "Ownership\\&Scope"; // Escaped ampersand
     const DATE_FIELD_NAME = "SOP Next Review Date";
@@ -68,20 +68,23 @@ AJS.toInit(function($) {
     function handleCommentDialog() {
         $(document).on('click', '.' + DIALOG_TRIGGER_CLASS, function() {
             console.log("Dialog trigger clicked");
-            waitForIframeContent(initializeCommentIframe);
+            waitForCommentIframeContent();
         });
     }
 
-    function waitForIframeContent(callback) {
-        console.log("Waiting for iframe content...");
+    function waitForCommentIframeContent() {
+        console.log("Waiting for comment iframe content...");
         const checkInterval = setInterval(function() {
             $('iframe').each(function() {
                 const $iframe = $(this);
                 const $iframeContent = $iframe.contents();
-                if ($iframeContent.find('body').length) {
-                    console.log("Iframe content found");
+                const $textarea = $iframeContent.find('textarea[name="comment"]');
+                const $buttons = $iframeContent.find('button');
+
+                if ($textarea.length && $buttons.length) {
+                    console.log("Comment iframe content found");
                     clearInterval(checkInterval);
-                    callback($iframe);
+                    initializeCommentIframeContent($textarea, $buttons);
                     return false; // Break the each loop
                 }
             });
@@ -90,36 +93,28 @@ AJS.toInit(function($) {
         // Stop checking after 30 seconds to prevent infinite loop
         setTimeout(() => {
             clearInterval(checkInterval);
-            console.log("Iframe content not found after 30 seconds");
+            console.log("Comment iframe content not found after 30 seconds");
         }, 30000);
     }
 
-    function initializeCommentIframe($iframe) {
-        const $iframeContent = $iframe.contents();
-        const $textarea = $iframeContent.find('textarea[name="comment"]');
-        const $buttons = $iframeContent.find('button');
+    function initializeCommentIframeContent($textarea, $buttons) {
+        console.log("Initializing comment iframe content");
 
-        if ($textarea.length && $buttons.length) {
-            console.log("Initializing comment iframe content");
+        // Initially disable all buttons
+        $buttons.prop('disabled', true);
 
-            // Initially disable all buttons
-            $buttons.prop('disabled', true);
-
-            // Function to check comment validity
-            function isValidComment(comment) {
-                return comment.trim().length > 0 && !/^\s*$/.test(comment);
-            }
-
-            // Event listener for textarea
-            $textarea.on('input', function() {
-                const isValid = isValidComment($(this).val());
-                $buttons.prop('disabled', !isValid);
-            });
-
-            console.log("Comment iframe content initialized");
-        } else {
-            console.log("Textarea or buttons not found in comment iframe");
+        // Function to check comment validity
+        function isValidComment(comment) {
+            return comment.trim().length > 0 && !/^\s*$/.test(comment);
         }
+
+        // Event listener for textarea
+        $textarea.on('input', function() {
+            const isValid = isValidComment($(this).val());
+            $buttons.prop('disabled', !isValid);
+        });
+
+        console.log("Comment iframe content initialized");
     }
 
     function handleParametersDialog() {
@@ -130,7 +125,7 @@ AJS.toInit(function($) {
                     const $parametersDialog = $(`#${PARAMETERS_DIALOG_ID}`);
                     if ($parametersDialog.length) {
                         observer.disconnect();
-                        waitForIframeContent(updateParametersDialogContent);
+                        waitForParametersIframeContent();
                     }
                 }
             });
@@ -139,11 +134,35 @@ AJS.toInit(function($) {
         observer.observe(document.body, { childList: true, subtree: true });
     }
 
-    function updateParametersDialogContent($iframe) {
-        const iframeContent = $iframe.contents();
-        const $dateInput = iframeContent.find('input[id$="-uid3-input"]');
-        const $dateDisplay = iframeContent.find('div.css-shaw93-singleValue');
-        const $formatSelectorDiv = iframeContent.find('div[class^="FieldDuration_formatSelector"]');
+    function waitForParametersIframeContent() {
+        console.log("Waiting for parameters iframe content...");
+        const checkInterval = setInterval(function() {
+            $('iframe').each(function() {
+                const $iframe = $(this);
+                const $iframeContent = $iframe.contents();
+                const $dateInput = $iframeContent.find('input[id$="-uid3-input"]');
+                const $dateDisplay = $iframeContent.find('div.css-shaw93-singleValue');
+
+                if ($dateInput.length && $dateDisplay.length) {
+                    console.log("Parameters iframe content found");
+                    clearInterval(checkInterval);
+                    updateParametersDialogContent($iframeContent);
+                    return false; // Break the each loop
+                }
+            });
+        }, 100); // Check every 100ms
+
+        // Stop checking after 30 seconds to prevent infinite loop
+        setTimeout(() => {
+            clearInterval(checkInterval);
+            console.log("Parameters iframe content not found after 30 seconds");
+        }, 30000);
+    }
+
+    function updateParametersDialogContent($iframeContent) {
+        const $dateInput = $iframeContent.find('input[id$="-uid3-input"]');
+        const $dateDisplay = $iframeContent.find('div.css-shaw93-singleValue');
+        const $formatSelectorDiv = $iframeContent.find('div[class^="FieldDuration_formatSelector"]');
 
         if ($dateInput.length && $dateDisplay.length) {
             const nextYear = getNextYearDate();
@@ -186,4 +205,4 @@ AJS.toInit(function($) {
     waitForTable();
 });
 
-console.log("Robust Ownership & Scope table formatter script loaded");
+console.log("Refined Ownership & Scope table formatter script loaded");
