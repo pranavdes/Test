@@ -1,8 +1,8 @@
 AJS.toInit(function($) {
-    console.log("Refined Ownership & Scope table formatter script initialized");
+    console.log("Complete Ownership & Scope table formatter script initialized");
 
     const TABLE_ID = "Ownership\\&Scope"; // Escaped ampersand
-    const DATE_FIELD_NAME = "SOP Next Review Date";
+    const DATE_FIELDS = ["SOP Next Review Date", "Last Review Date"];
     const REVIEWER_FIELD_NAME = "Last Reviewed By";
     const DIALOG_TRIGGER_CLASS = "cw-byline__dialog-trigger";
     const DUMMY_DATE = "2025-01-01";
@@ -35,17 +35,21 @@ AJS.toInit(function($) {
         if (table.length) {
             console.log("Table found, processing...");
 
-            // Process SOP Next Review Date
-            const dateRow = table.find('th span:contains("' + DATE_FIELD_NAME + '")').closest('tr');
-            if (dateRow.length) {
-                const dateCell = dateRow.find('td span span span');
-                const originalDate = dateCell.text().trim();
-                const newDate = convertDateFormat(originalDate);
-                dateCell.text(newDate);
-                console.log("Date converted:", originalDate, "to", newDate);
-            } else {
-                console.log("SOP Next Review Date row not found");
-            }
+            // Process date fields
+            DATE_FIELDS.forEach(fieldName => {
+                const dateRow = table.find('th span:contains("' + fieldName + '")').closest('tr');
+                if (dateRow.length) {
+                    const dateCell = dateRow.find('td span span');
+                    // Add an extra 'span' selector for 'SOP Next Review Date' if needed
+                    const dateCellContent = fieldName === "SOP Next Review Date" ? dateCell.find('span') : dateCell;
+                    const originalDate = dateCellContent.text().trim();
+                    const newDate = convertDateFormat(originalDate);
+                    dateCellContent.text(newDate);
+                    console.log(`${fieldName} converted:`, originalDate, "to", newDate);
+                } else {
+                    console.log(`${fieldName} row not found`);
+                }
+            });
 
             // Process Last Reviewed By
             const reviewerRow = table.find('th span:contains("' + REVIEWER_FIELD_NAME + '")').closest('tr');
@@ -100,19 +104,21 @@ AJS.toInit(function($) {
     function initializeCommentIframeContent($textarea, $buttons) {
         console.log("Initializing comment iframe content");
 
-        // Initially disable all buttons
-        $buttons.prop('disabled', true);
+        function updateButtonState() {
+            const isValid = isValidComment($textarea.val());
+            $buttons.prop('disabled', !isValid);
+        }
 
         // Function to check comment validity
         function isValidComment(comment) {
             return comment.trim().length > 0 && !/^\s*$/.test(comment);
         }
 
+        // Initially set button state
+        updateButtonState();
+
         // Event listener for textarea
-        $textarea.on('input', function() {
-            const isValid = isValidComment($(this).val());
-            $buttons.prop('disabled', !isValid);
-        });
+        $textarea.on('input', updateButtonState);
 
         console.log("Comment iframe content initialized");
     }
@@ -140,10 +146,11 @@ AJS.toInit(function($) {
             $('iframe').each(function() {
                 const $iframe = $(this);
                 const $iframeContent = $iframe.contents();
-                const $dateInput = $iframeContent.find('input[id$="-uid3-input"]');
-                const $dateDisplay = $iframeContent.find('div.css-shaw93-singleValue');
-
-                if ($dateInput.length && $dateDisplay.length) {
+                
+                // Look for the SOP Next Review Date label
+                const $dateLabel = $iframeContent.find('label:contains("SOP Next Review Date")');
+                
+                if ($dateLabel.length) {
                     console.log("Parameters iframe content found");
                     clearInterval(checkInterval);
                     updateParametersDialogContent($iframeContent);
@@ -160,27 +167,33 @@ AJS.toInit(function($) {
     }
 
     function updateParametersDialogContent($iframeContent) {
-        const $dateInput = $iframeContent.find('input[id$="-uid3-input"]');
-        const $dateDisplay = $iframeContent.find('div.css-shaw93-singleValue');
-        const $formatSelectorDiv = $iframeContent.find('div[class^="FieldDuration_formatSelector"]');
+        const $dateLabel = $iframeContent.find('label:contains("SOP Next Review Date")');
+        if ($dateLabel.length) {
+            const $dateContainer = $dateLabel.closest('.index_field_352HP');
+            const $dateInput = $dateContainer.find('input[type="hidden"]');
+            const $dateDisplay = $dateContainer.find('.css-shaw93-singleValue');
+            const $formatSelectorDiv = $dateContainer.find('div[class^="FieldDuration_formatSelector"]');
 
-        if ($dateInput.length && $dateDisplay.length) {
-            const nextYear = getNextYearDate();
-            const formattedDate = formatDateYYYYMMDD(nextYear);
-            const displayDate = convertDateFormat(formattedDate);
+            if ($dateInput.length && $dateDisplay.length) {
+                const nextYear = getNextYearDate();
+                const formattedDate = formatDateYYYYMMDD(nextYear);
+                const displayDate = convertDateFormat(formattedDate);
 
-            $dateInput.val(formattedDate).trigger('change');
-            $dateDisplay.text(displayDate);
-            console.log("SOP Next Review Date updated in parameters dialog");
+                $dateInput.val(formattedDate).trigger('change');
+                $dateDisplay.text(displayDate);
+                console.log("SOP Next Review Date updated in parameters dialog");
+            } else {
+                console.log("Date input or display not found in parameters dialog");
+            }
+
+            if ($formatSelectorDiv.length) {
+                $formatSelectorDiv.hide();
+                console.log("Format selector hidden in parameters dialog");
+            } else {
+                console.log("Format selector not found in parameters dialog");
+            }
         } else {
-            console.log("Date input or display not found in parameters dialog");
-        }
-
-        if ($formatSelectorDiv.length) {
-            $formatSelectorDiv.hide();
-            console.log("Format selector hidden in parameters dialog");
-        } else {
-            console.log("Format selector not found in parameters dialog");
+            console.log("SOP Next Review Date label not found in parameters dialog");
         }
     }
 
@@ -205,4 +218,4 @@ AJS.toInit(function($) {
     waitForTable();
 });
 
-console.log("Refined Ownership & Scope table formatter script loaded");
+console.log("Complete Ownership & Scope table formatter script loaded");
