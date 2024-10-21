@@ -1,5 +1,5 @@
 AJS.toInit(function($) {
-    console.log("Complete Ownership & Scope table formatter script initialized");
+    console.log("Complete React-aware Ownership & Scope table formatter script initialized");
 
     const TABLE_ID = "Ownership\\&Scope"; // Escaped ampersand
     const DATE_FIELDS = ["SOP Next Review Date", "Last Review Date"];
@@ -169,21 +169,36 @@ AJS.toInit(function($) {
     function updateParametersDialogContent($iframeContent) {
         const $dateLabel = $iframeContent.find('label:contains("SOP Next Review Date")');
         if ($dateLabel.length) {
-            const $dateContainer = $dateLabel.closest('.index_field_352HP');
-            const $dateInput = $dateContainer.find('input[type="hidden"]');
-            const $dateDisplay = $dateContainer.find('.css-shaw93-singleValue');
+            const $dateContainer = $dateLabel.closest('.index_field__3S2HP');
+            const $dateInputs = $dateContainer.find('input[type="hidden"]');
+            const $dateDisplay = $dateContainer.find('.css-shuw93-singleValue');
             const $formatSelectorDiv = $dateContainer.find('div[class^="FieldDuration_formatSelector"]');
 
-            if ($dateInput.length && $dateDisplay.length) {
+            if ($dateInputs.length && $dateDisplay.length) {
                 const nextYear = getNextYearDate();
                 const formattedDate = formatDateYYYYMMDD(nextYear);
                 const displayDate = convertDateFormat(formattedDate);
 
-                $dateInput.val(formattedDate).trigger('change');
+                // Function to simulate React input change
+                function simulateReactChange(input, newValue) {
+                    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+                    nativeInputValueSetter.call(input, newValue);
+
+                    const event = new Event('input', { bubbles: true });
+                    input.dispatchEvent(event);
+                }
+
+                // Update hidden inputs
+                $dateInputs.each(function(index, input) {
+                    simulateReactChange(input, formattedDate);
+                });
+
+                // Update display (this might be handled by React, but we'll do it anyway)
                 $dateDisplay.text(displayDate);
+
                 console.log("SOP Next Review Date updated in parameters dialog");
             } else {
-                console.log("Date input or display not found in parameters dialog");
+                console.log("Date inputs or display not found in parameters dialog");
             }
 
             if ($formatSelectorDiv.length) {
@@ -218,4 +233,4 @@ AJS.toInit(function($) {
     waitForTable();
 });
 
-console.log("Complete Ownership & Scope table formatter script loaded");
+console.log("Complete React-aware Ownership & Scope table formatter script loaded");
