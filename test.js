@@ -26,8 +26,11 @@ AJS.toInit(function($) {
         return today;
     }
 
-    function formatDateYYYYMMDD(date) {
-        return date.toISOString().split('T')[0];
+    function formatDateMMDDYYYY(date) {
+        const month = (date.getMonth() + 1).toString().padStart(2, '0');
+        const day = date.getDate().toString().padStart(2, '0');
+        const year = date.getFullYear().toString().slice(-2);
+        return `${month}/${day}/${year}`;
     }
 
     function formatTable() {
@@ -170,41 +173,19 @@ AJS.toInit(function($) {
         const $dateLabel = $iframeContent.find('label:contains("SOP Next Review Date")');
         if ($dateLabel.length) {
             const $dateContainer = $dateLabel.closest('.index_field__3S2HP');
-            const $dateInputs = $dateContainer.find('input[type="hidden"]');
-            const $dateDisplay = $dateContainer.find('.css-shuw93-singleValue');
+            const $dateInput = $dateContainer.find('input#react-select-param598305003-uid3-input');
             const $formatSelectorDiv = $dateContainer.find('div[class^="FieldDuration_formatSelector"]');
 
-            if ($dateInputs.length && $dateDisplay.length) {
+            if ($dateInput.length) {
                 const nextYear = getNextYearDate();
-                const formattedDate = formatDateYYYYMMDD(nextYear);
-                const displayDate = convertDateFormat(formattedDate);
+                const formattedDate = formatDateMMDDYYYY(nextYear);
 
-                // Update hidden inputs
-                $dateInputs.each(function(index, input) {
-                    simulateReactChange(input, formattedDate);
-                });
-
-                // Update display
-                $dateDisplay.text(displayDate);
+                // Simulate typing the date
+                simulateTyping($dateInput[0], formattedDate);
 
                 console.log("SOP Next Review Date updated in parameters dialog");
-
-                // Set up a mutation observer to handle calendar opening
-                const observer = new MutationObserver((mutations) => {
-                    mutations.forEach((mutation) => {
-                        if (mutation.type === 'childList' && mutation.addedNodes.length) {
-                            const $calendarContainer = $(mutation.addedNodes).find('#react-select-param598305003-uid3-listbox');
-                            if ($calendarContainer.length) {
-                                updateCalendarDisplay($calendarContainer, nextYear);
-                                observer.disconnect();
-                            }
-                        }
-                    });
-                });
-
-                observer.observe($dateContainer[0], { childList: true, subtree: true });
             } else {
-                console.log("Date inputs or display not found in parameters dialog");
+                console.log("Date input not found in parameters dialog");
             }
 
             if ($formatSelectorDiv.length) {
@@ -218,26 +199,15 @@ AJS.toInit(function($) {
         }
     }
 
-    function updateCalendarDisplay($calendarContainer, date) {
-        const $monthYearButton = $calendarContainer.find('button.css-ahwpyx').first();
-        if ($monthYearButton.length) {
-            $monthYearButton.text(date.toLocaleString('default', { month: 'long', year: 'numeric' }));
-        }
-
-        // Find and click on the correct date
-        const currentDateSelector = `[aria-label="${date.getDate()}"]`;
-        const $currentDateCell = $calendarContainer.find(currentDateSelector);
-        if ($currentDateCell.length) {
-            $currentDateCell[0].click();
-        }
-    }
-
-    function simulateReactChange(input, newValue) {
+    function simulateTyping(input, text) {
         const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-        nativeInputValueSetter.call(input, newValue);
+        nativeInputValueSetter.call(input, '');
+        input.dispatchEvent(new Event('input', { bubbles: true }));
 
-        const event = new Event('input', { bubbles: true });
-        input.dispatchEvent(event);
+        for (let i = 0; i < text.length; i++) {
+            nativeInputValueSetter.call(input, input.value + text[i]);
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        }
     }
 
     function initialize() {
