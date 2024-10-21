@@ -1,5 +1,5 @@
 AJS.toInit(function($) {
-    console.log("Complete Refined Ownership & Scope table formatter script initialized");
+    console.log("Revised Ownership & Scope table formatter script initialized");
 
     const TABLE_ID = "Ownership\\&Scope"; // Escaped ampersand
     const DATE_FIELDS = ["SOP Next Review Date", "Last Review Date"];
@@ -16,21 +16,14 @@ AJS.toInit(function($) {
         if (isNaN(date.getTime())) {
             return dateString; // Return original string if it's an invalid date
         }
-        const options = { year: 'numeric', month: 'short', day: '2-digit' };
-        return date.toLocaleDateString('en-US', options).replace(/(\w+) (\d+), (\d+)/, '$1 $2 $3');
+        const options = { weekday: 'short', year: 'numeric', month: 'short', day: '2-digit' };
+        return date.toLocaleDateString('en-US', options);
     }
 
     function getNextYearDate() {
         const today = new Date();
         today.setFullYear(today.getFullYear() + 1);
         return today;
-    }
-
-    function formatDateMMDDYYYY(date) {
-        const month = (date.getMonth() + 1).toString().padStart(2, '0');
-        const day = date.getDate().toString().padStart(2, '0');
-        const year = date.getFullYear().toString().slice(-2);
-        return `${month}/${day}/${year}`;
     }
 
     function formatTable() {
@@ -127,7 +120,6 @@ AJS.toInit(function($) {
     }
 
     function handleParametersDialog() {
-        // We'll use MutationObserver to detect when the parameters dialog is added to the DOM
         const observer = new MutationObserver(function(mutations) {
             mutations.forEach(function(mutation) {
                 if (mutation.type === 'childList') {
@@ -150,7 +142,6 @@ AJS.toInit(function($) {
                 const $iframe = $(this);
                 const $iframeContent = $iframe.contents();
                 
-                // Look for the SOP Next Review Date label
                 const $dateLabel = $iframeContent.find('label:contains("SOP Next Review Date")');
                 
                 if ($dateLabel.length) {
@@ -162,7 +153,6 @@ AJS.toInit(function($) {
             });
         }, 100); // Check every 100ms
 
-        // Stop checking after 30 seconds to prevent infinite loop
         setTimeout(() => {
             clearInterval(checkInterval);
             console.log("Parameters iframe content not found after 30 seconds");
@@ -173,22 +163,22 @@ AJS.toInit(function($) {
         const $dateLabel = $iframeContent.find('label:contains("SOP Next Review Date")');
         if ($dateLabel.length) {
             const $dateContainer = $dateLabel.closest('.index_field__3S2HP');
-            const $dateInput = $dateContainer.find('input#react-select-param598305003-uid3-input');
+            const $dateDisplay = $dateContainer.find('.css-shuw93-singleValue');
             const $formatSelectorDiv = $dateContainer.find('div[class^="FieldDuration_formatSelector"]');
 
-            if ($dateInput.length) {
+            if ($dateDisplay.length) {
                 const nextYear = getNextYearDate();
-                const formattedDate = formatDateMMDDYYYY(nextYear);
+                const formattedDate = convertDateFormat(nextYear.toISOString());
 
-                // Update the input value without opening the calendar
-                updateInputValue($dateInput[0], formattedDate);
+                // Update only the visible text
+                $dateDisplay.text(formattedDate);
 
-                // Set up a listener for calendar opening
-                setupCalendarListener($dateContainer, nextYear);
+                // Set up an observer to maintain our formatted date
+                setupDateObserver($dateContainer, formattedDate);
 
-                console.log("SOP Next Review Date updated in parameters dialog");
+                console.log("SOP Next Review Date display updated in parameters dialog");
             } else {
-                console.log("Date input not found in parameters dialog");
+                console.log("Date display not found in parameters dialog");
             }
 
             if ($formatSelectorDiv.length) {
@@ -202,40 +192,23 @@ AJS.toInit(function($) {
         }
     }
 
-    function updateInputValue(input, value) {
-        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-        nativeInputValueSetter.call(input, value);
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-    }
-
-    function setupCalendarListener($dateContainer, date) {
+    function setupDateObserver($dateContainer, formattedDate) {
         const observer = new MutationObserver((mutations) => {
             mutations.forEach((mutation) => {
-                if (mutation.type === 'childList' && mutation.addedNodes.length) {
-                    const $calendarContainer = $(mutation.addedNodes).find('[role="presentation"]').first();
-                    if ($calendarContainer.length) {
-                        updateCalendarSelection($calendarContainer, date);
-                        observer.disconnect();
+                if (mutation.type === 'childList' || mutation.type === 'characterData') {
+                    const $dateDisplay = $dateContainer.find('.css-shuw93-singleValue');
+                    if ($dateDisplay.text() !== formattedDate) {
+                        $dateDisplay.text(formattedDate);
                     }
                 }
             });
         });
 
-        observer.observe($dateContainer[0], { childList: true, subtree: true });
-    }
-
-    function updateCalendarSelection($calendarContainer, date) {
-        setTimeout(() => {
-            const daySelector = `[role="gridcell"][aria-label*="${date.getDate()}/${date.getMonth() + 1}/${date.getFullYear()}"]`;
-            const $dayElement = $calendarContainer.find(daySelector);
-            if ($dayElement.length) {
-                $dayElement.click();
-                console.log("Calendar date selected");
-            } else {
-                console.log("Could not find the correct date in the calendar");
-            }
-        }, 100); // Small delay to ensure calendar is fully rendered
+        observer.observe($dateContainer[0], { 
+            childList: true, 
+            subtree: true, 
+            characterData: true 
+        });
     }
 
     function initialize() {
@@ -244,7 +217,6 @@ AJS.toInit(function($) {
         handleParametersDialog();
     }
 
-    // Wait for the table to load
     function waitForTable() {
         if ($(`#${TABLE_ID}`).length) {
             console.log("Table found, initializing...");
@@ -255,8 +227,7 @@ AJS.toInit(function($) {
         }
     }
 
-    // Start the process
     waitForTable();
 });
 
-console.log("Complete Refined Ownership & Scope table formatter script loaded");
+console.log("Revised Ownership & Scope table formatter script loaded");
