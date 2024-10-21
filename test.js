@@ -1,5 +1,5 @@
 AJS.toInit(function($) {
-    console.log("Complete React-aware Ownership & Scope table formatter script initialized");
+    console.log("Complete Ownership & Scope table formatter script initialized");
 
     const TABLE_ID = "Ownership\\&Scope"; // Escaped ampersand
     const DATE_FIELDS = ["SOP Next Review Date", "Last Review Date"];
@@ -173,6 +173,7 @@ AJS.toInit(function($) {
             const $dateInputs = $dateContainer.find('input[type="hidden"]');
             const $dateDisplay = $dateContainer.find('.css-shuw93-singleValue');
             const $formatSelectorDiv = $dateContainer.find('div[class^="FieldDuration_formatSelector"]');
+            const $calendarTrigger = $dateContainer.find('[aria-haspopup="true"]');
 
             if ($dateInputs.length && $dateDisplay.length) {
                 const nextYear = getNextYearDate();
@@ -193,8 +194,20 @@ AJS.toInit(function($) {
                     simulateReactChange(input, formattedDate);
                 });
 
-                // Update display (this might be handled by React, but we'll do it anyway)
+                // Update display
                 $dateDisplay.text(displayDate);
+
+                // Trigger calendar update
+                if ($calendarTrigger.length) {
+                    // Simulate click to open calendar
+                    $calendarTrigger[0].click();
+                    
+                    // Wait a brief moment for the calendar to open
+                    setTimeout(() => {
+                        // Simulate click to close calendar
+                        $calendarTrigger[0].click();
+                    }, 100);
+                }
 
                 console.log("SOP Next Review Date updated in parameters dialog");
             } else {
@@ -233,4 +246,4 @@ AJS.toInit(function($) {
     waitForTable();
 });
 
-console.log("Complete React-aware Ownership & Scope table formatter script loaded");
+console.log("Complete Ownership & Scope table formatter script loaded");
