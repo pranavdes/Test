@@ -173,7 +173,6 @@ AJS.toInit(function($) {
             const $dateInputs = $dateContainer.find('input[type="hidden"]');
             const $dateDisplay = $dateContainer.find('.css-shuw93-singleValue');
             const $formatSelectorDiv = $dateContainer.find('div[class^="FieldDuration_formatSelector"]');
-            const $calendarContainer = $iframeContent.find('#react-select-param598305003-uid3-listbox');
 
             if ($dateInputs.length && $dateDisplay.length) {
                 const nextYear = getNextYearDate();
@@ -188,28 +187,22 @@ AJS.toInit(function($) {
                 // Update display
                 $dateDisplay.text(displayDate);
 
-                // Update calendar
-                if ($calendarContainer.length) {
-                    const $announcementSpan = $calendarContainer.find('#announce-1val-announce');
-                    const $monthYearButton = $calendarContainer.find('button.css-ahwpyx').first();
-                    
-                    if ($announcementSpan.length) {
-                        $announcementSpan.text(nextYear.toDateString());
-                    }
-                    
-                    if ($monthYearButton.length) {
-                        $monthYearButton.text(nextYear.toLocaleString('default', { month: 'long', year: 'numeric' }));
-                    }
-
-                    // Trigger a click on the current date to update the selection
-                    const currentDateSelector = `[aria-label="${nextYear.getDate()}"]`;
-                    const $currentDateCell = $calendarContainer.find(currentDateSelector);
-                    if ($currentDateCell.length) {
-                        $currentDateCell[0].click();
-                    }
-                }
-
                 console.log("SOP Next Review Date updated in parameters dialog");
+
+                // Set up a mutation observer to handle calendar opening
+                const observer = new MutationObserver((mutations) => {
+                    mutations.forEach((mutation) => {
+                        if (mutation.type === 'childList' && mutation.addedNodes.length) {
+                            const $calendarContainer = $(mutation.addedNodes).find('#react-select-param598305003-uid3-listbox');
+                            if ($calendarContainer.length) {
+                                updateCalendarDisplay($calendarContainer, nextYear);
+                                observer.disconnect();
+                            }
+                        }
+                    });
+                });
+
+                observer.observe($dateContainer[0], { childList: true, subtree: true });
             } else {
                 console.log("Date inputs or display not found in parameters dialog");
             }
@@ -222,6 +215,20 @@ AJS.toInit(function($) {
             }
         } else {
             console.log("SOP Next Review Date label not found in parameters dialog");
+        }
+    }
+
+    function updateCalendarDisplay($calendarContainer, date) {
+        const $monthYearButton = $calendarContainer.find('button.css-ahwpyx').first();
+        if ($monthYearButton.length) {
+            $monthYearButton.text(date.toLocaleString('default', { month: 'long', year: 'numeric' }));
+        }
+
+        // Find and click on the correct date
+        const currentDateSelector = `[aria-label="${date.getDate()}"]`;
+        const $currentDateCell = $calendarContainer.find(currentDateSelector);
+        if ($currentDateCell.length) {
+            $currentDateCell[0].click();
         }
     }
 
