@@ -5,7 +5,7 @@ AJS.toInit(function($) {
     const DATE_FIELDS = ["SOP Next Review Date", "Last Review Date"];
     const REVIEWER_FIELD_NAME = "Last Reviewed By";
     const DIALOG_TRIGGER_CLASS = "cw-byline__dialog-trigger";
-    const DUMMY_DATE = "2025-01-01";
+    const DUMMY_DATE = "1970-01-01";
     const PARAMETERS_DIALOG_ID = "cw-parametersDialog_content";
 
     function convertDateFormat(dateString) {
@@ -17,7 +17,7 @@ AJS.toInit(function($) {
             return dateString; // Return original string if it's an invalid date
         }
         const options = { year: 'numeric', month: 'short', day: '2-digit' };
-        return date.toLocaleDateString('en-US', options).replace(/(\w+) (\d+), (\d+)/, '$1 $2, $3,');
+        return date.toLocaleDateString('en-US', options).replace(/(\w+) (\d+), (\d+)/, '$1 $2 $3');
     }
 
     function getNextYearDate() {
@@ -173,21 +173,12 @@ AJS.toInit(function($) {
             const $dateInputs = $dateContainer.find('input[type="hidden"]');
             const $dateDisplay = $dateContainer.find('.css-shuw93-singleValue');
             const $formatSelectorDiv = $dateContainer.find('div[class^="FieldDuration_formatSelector"]');
-            const $calendarTrigger = $dateContainer.find('[aria-haspopup="true"]');
+            const $calendarContainer = $iframeContent.find('#react-select-param598305003-uid3-listbox');
 
             if ($dateInputs.length && $dateDisplay.length) {
                 const nextYear = getNextYearDate();
                 const formattedDate = formatDateYYYYMMDD(nextYear);
                 const displayDate = convertDateFormat(formattedDate);
-
-                // Function to simulate React input change
-                function simulateReactChange(input, newValue) {
-                    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-                    nativeInputValueSetter.call(input, newValue);
-
-                    const event = new Event('input', { bubbles: true });
-                    input.dispatchEvent(event);
-                }
 
                 // Update hidden inputs
                 $dateInputs.each(function(index, input) {
@@ -197,16 +188,25 @@ AJS.toInit(function($) {
                 // Update display
                 $dateDisplay.text(displayDate);
 
-                // Trigger calendar update
-                if ($calendarTrigger.length) {
-                    // Simulate click to open calendar
-                    $calendarTrigger[0].click();
+                // Update calendar
+                if ($calendarContainer.length) {
+                    const $announcementSpan = $calendarContainer.find('#announce-1val-announce');
+                    const $monthYearButton = $calendarContainer.find('button.css-ahwpyx').first();
                     
-                    // Wait a brief moment for the calendar to open
-                    setTimeout(() => {
-                        // Simulate click to close calendar
-                        $calendarTrigger[0].click();
-                    }, 100);
+                    if ($announcementSpan.length) {
+                        $announcementSpan.text(nextYear.toDateString());
+                    }
+                    
+                    if ($monthYearButton.length) {
+                        $monthYearButton.text(nextYear.toLocaleString('default', { month: 'long', year: 'numeric' }));
+                    }
+
+                    // Trigger a click on the current date to update the selection
+                    const currentDateSelector = `[aria-label="${nextYear.getDate()}"]`;
+                    const $currentDateCell = $calendarContainer.find(currentDateSelector);
+                    if ($currentDateCell.length) {
+                        $currentDateCell[0].click();
+                    }
                 }
 
                 console.log("SOP Next Review Date updated in parameters dialog");
@@ -223,6 +223,14 @@ AJS.toInit(function($) {
         } else {
             console.log("SOP Next Review Date label not found in parameters dialog");
         }
+    }
+
+    function simulateReactChange(input, newValue) {
+        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+        nativeInputValueSetter.call(input, newValue);
+
+        const event = new Event('input', { bubbles: true });
+        input.dispatchEvent(event);
     }
 
     function initialize() {
