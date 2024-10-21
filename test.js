@@ -1,5 +1,5 @@
 AJS.toInit(function($) {
-    console.log("Complete Ownership & Scope table formatter script initialized");
+    console.log("Complete Refined Ownership & Scope table formatter script initialized");
 
     const TABLE_ID = "Ownership\\&Scope"; // Escaped ampersand
     const DATE_FIELDS = ["SOP Next Review Date", "Last Review Date"];
@@ -180,8 +180,11 @@ AJS.toInit(function($) {
                 const nextYear = getNextYearDate();
                 const formattedDate = formatDateMMDDYYYY(nextYear);
 
-                // Simulate typing the date
-                simulateTyping($dateInput[0], formattedDate);
+                // Update the input value without opening the calendar
+                updateInputValue($dateInput[0], formattedDate);
+
+                // Set up a listener for calendar opening
+                setupCalendarListener($dateContainer, nextYear);
 
                 console.log("SOP Next Review Date updated in parameters dialog");
             } else {
@@ -199,15 +202,40 @@ AJS.toInit(function($) {
         }
     }
 
-    function simulateTyping(input, text) {
+    function updateInputValue(input, value) {
         const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-        nativeInputValueSetter.call(input, '');
+        nativeInputValueSetter.call(input, value);
         input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+    }
 
-        for (let i = 0; i < text.length; i++) {
-            nativeInputValueSetter.call(input, input.value + text[i]);
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-        }
+    function setupCalendarListener($dateContainer, date) {
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach((mutation) => {
+                if (mutation.type === 'childList' && mutation.addedNodes.length) {
+                    const $calendarContainer = $(mutation.addedNodes).find('[role="presentation"]').first();
+                    if ($calendarContainer.length) {
+                        updateCalendarSelection($calendarContainer, date);
+                        observer.disconnect();
+                    }
+                }
+            });
+        });
+
+        observer.observe($dateContainer[0], { childList: true, subtree: true });
+    }
+
+    function updateCalendarSelection($calendarContainer, date) {
+        setTimeout(() => {
+            const daySelector = `[role="gridcell"][aria-label*="${date.getDate()}/${date.getMonth() + 1}/${date.getFullYear()}"]`;
+            const $dayElement = $calendarContainer.find(daySelector);
+            if ($dayElement.length) {
+                $dayElement.click();
+                console.log("Calendar date selected");
+            } else {
+                console.log("Could not find the correct date in the calendar");
+            }
+        }, 100); // Small delay to ensure calendar is fully rendered
     }
 
     function initialize() {
@@ -231,4 +259,4 @@ AJS.toInit(function($) {
     waitForTable();
 });
 
-console.log("Complete Ownership & Scope table formatter script loaded");
+console.log("Complete Refined Ownership & Scope table formatter script loaded");
