@@ -1,13 +1,12 @@
 /**
  * Confluence Formatter Module
- * Version: 2.1.0
+ * Version: 2.2.0
  * Purpose: Format tables and handle iframe content in Confluence pages
  * 
- * Commit Message: Complete implementation with table formatting and dynamic iframe handling
+ * Commit Message: Complete implementation with fixed iframe handling
  * Changes:
- * - Combined table formatting with improved iframe handling
- * - Added proper dialog trigger detection
- * - Improved iframe content handling timing
+ * - Fixed iframe detection and handling timing
+ * - Improved event handling for dialog triggers
  * - Enhanced error handling and logging
  */
 
@@ -28,8 +27,8 @@ AJS.toInit(function($) {
         // Iframe handling config
         dialogTriggerClass: 'cw-byline__dialog-trigger',
         iframe: {
-            maxAttempts: 10,
-            checkInterval: 300, // milliseconds
+            maxAttempts: 20,
+            checkInterval: 250, // milliseconds
             selectors: {
                 durationFormat: 'div[class^="FieldDuration_formatSelector"]'
             }
@@ -54,36 +53,28 @@ AJS.toInit(function($) {
         }
     };
 
-    // ========== Table Formatting Functions ==========
-
     /**
      * Converts date format to a standardized string
-     * @param {string} dateString - The date string to convert
-     * @returns {string} - Formatted date string or empty string if invalid
      */
     function convertDateFormat(dateString) {
         try {
-            // Handle empty or dummy date
             if (!dateString || !dateString.trim() || dateString.trim() === CONFIG.dummyDate) {
                 Logger.log('Empty or dummy date received');
                 return '';
             }
 
-            // Try parsing the date
             const date = new Date(dateString);
             
-            // Check if date is valid
             if (isNaN(date.getTime())) {
                 Logger.error('Invalid date format:', dateString);
-                return dateString; // Return original if parsing fails
+                return dateString;
             }
 
-            // Format the date
             const options = { 
                 year: 'numeric', 
                 month: 'short', 
                 day: '2-digit',
-                timeZone: 'UTC' // Ensure consistent timezone handling
+                timeZone: 'UTC'
             };
 
             return date
@@ -93,13 +84,12 @@ AJS.toInit(function($) {
 
         } catch (error) {
             Logger.error('Error in convertDateFormat:', error);
-            return dateString; // Return original string if conversion fails
+            return dateString;
         }
     }
 
     /**
-     * Formats the reviewer field by removing brackets and '~' character
-     * @param {jQuery} reviewerCell - jQuery element containing reviewer information
+     * Formats the reviewer field
      */
     function formatReviewer(reviewerCell) {
         try {
@@ -110,7 +100,6 @@ AJS.toInit(function($) {
 
             let reviewerContent = reviewerCell.html();
             if (reviewerContent) {
-                // Remove [~ and ] from reviewer content
                 reviewerContent = reviewerContent.replace(/^\[~/, '').replace(/\]$/, '');
                 reviewerCell.html(reviewerContent);
                 Logger.log('Reviewer field formatted successfully');
@@ -121,9 +110,7 @@ AJS.toInit(function($) {
     }
 
     /**
-     * Validates table elements before processing
-     * @param {jQuery} table - jQuery table element
-     * @returns {boolean} - Whether the table is valid
+     * Validates table elements
      */
     function validateTable(table) {
         if (!table || !table.length) {
@@ -143,10 +130,7 @@ AJS.toInit(function($) {
     }
 
     /**
-     * Formats a single date field in the table
-     * @param {jQuery} table - jQuery table element
-     * @param {string} fieldName - Name of the date field
-     * @returns {boolean} - Whether the formatting was successful
+     * Formats a single date field
      */
     function formatDateField(table, fieldName) {
         try {
@@ -181,9 +165,7 @@ AJS.toInit(function($) {
     }
 
     /**
-     * Main function to format the table
-     * @param {number} retryCount - Number of retry attempts
-     * @returns {Promise} - Resolves when formatting is complete
+     * Main table formatting function
      */
     async function formatTable(retryCount = 0) {
         try {
@@ -199,12 +181,10 @@ AJS.toInit(function($) {
                 throw new Error('Table validation failed after max retries');
             }
 
-            // Format date fields
             const formattingResults = CONFIG.dateFields.map(fieldName => 
                 formatDateField(table, fieldName)
             );
 
-            // Format reviewer field
             const reviewerRow = table.find(`th span:contains("${CONFIG.reviewerField}")`).closest('tr');
             if (reviewerRow.length) {
                 const reviewerCell = reviewerRow.find('td p span span');
@@ -223,78 +203,120 @@ AJS.toInit(function($) {
         }
     }
 
-    // ========== Iframe Handling Functions ==========
-
     /**
      * Handles hiding the duration selector in the iframe
-     * @param {HTMLIFrameElement} iframe - The iframe element
      */
     function hideDurationSelector(iframe) {
-        try {
-            const $iframe = $(iframe);
-            const $iframeContent = $iframe.contents();
-            const $durationSelector = $iframeContent.find(CONFIG.iframe.selectors.durationFormat);
-            
-            if ($durationSelector.length) {
-                Logger.log('Found duration selector, hiding it');
-                $durationSelector.hide();
-                Logger.log('Successfully hid duration selector');
-            } else {
-                Logger.error('Duration selector not found in iframe');
+        return new Promise((resolve) => {
+            try {
+                const $iframe = $(iframe);
+                const $iframeContent = $iframe.contents();
+                const $durationSelector = $iframeContent.find('div[class^="FieldDuration_formatSelector"]');
+                
+                if ($durationSelector.length) {
+                    Logger.log('Found duration selector, hiding it');
+                    $durationSelector.hide();
+                    Logger.log('Successfully hid duration selector');
+                    resolve(true);
+                } else {
+                    Logger.log('Duration selector not found yet');
+                    resolve(false);
+                }
+            } catch (error) {
+                Logger.error('Error in hideDurationSelector:', error);
+                resolve(false);
             }
-        } catch (error) {
-            Logger.error('Error hiding duration selector:', error);
-        }
+        });
     }
 
     /**
-     * Waits for and handles iframe content
+     * Waits for iframe content to be ready
      */
-    function waitForCommentIframeContent() {
-        Logger.log("Starting to watch for iframe content...");
-        let attempts = 0;
-        
-        function checkForIframe() {
-            const $iframe = $('iframe').filter(function() {
+    function waitForIframeContent(iframe) {
+        return new Promise((resolve) => {
+            let attempts = 0;
+            
+            function checkContent() {
+                if (attempts >= CONFIG.iframe.maxAttempts) {
+                    Logger.log('Max attempts reached waiting for iframe content');
+                    resolve(false);
+                    return;
+                }
+
                 try {
-                    // Check if we can access iframe contents (same origin)
-                    return $(this).contents().find('body').length > 0;
-                } catch (e) {
-                    return false;
+                    hideDurationSelector(iframe).then(success => {
+                        if (success) {
+                            resolve(true);
+                        } else {
+                            attempts++;
+                            setTimeout(checkContent, CONFIG.iframe.checkInterval);
+                        }
+                    });
+                } catch (error) {
+                    Logger.error('Error checking iframe content:', error);
+                    attempts++;
+                    setTimeout(checkContent, CONFIG.iframe.checkInterval);
+                }
+            }
+
+            checkContent();
+        });
+    }
+
+    /**
+     * Handles dialog trigger clicks
+     */
+    function handleDialogTrigger() {
+        Logger.log('Dialog trigger clicked, starting iframe watch');
+        
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach((mutation) => {
+                if (mutation.addedNodes.length) {
+                    mutation.addedNodes.forEach((node) => {
+                        if (node.nodeName === 'IFRAME') {
+                            Logger.log('New iframe detected');
+                            const iframe = node;
+                            
+                            $(iframe).on('load', function() {
+                                Logger.log('Iframe loaded, waiting for content');
+                                waitForIframeContent(this).then(success => {
+                                    if (success) {
+                                        Logger.log('Successfully processed iframe content');
+                                    } else {
+                                        Logger.error('Failed to process iframe content');
+                                    }
+                                });
+                            });
+                        }
+                    });
                 }
             });
+        });
 
-            if ($iframe.length > 0) {
-                Logger.log("Found iframe, processing content");
-                hideDurationSelector($iframe[0]);
-                return true;
-            } else if (attempts < CONFIG.iframe.maxAttempts) {
-                attempts++;
-                Logger.log(`Iframe not found, attempt ${attempts}/${CONFIG.iframe.maxAttempts}`);
-                setTimeout(checkForIframe, CONFIG.iframe.checkInterval);
-                return false;
-            } else {
-                Logger.error("Failed to find iframe after maximum attempts");
-                return false;
-            }
-        }
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
 
-        checkForIframe();
+        setTimeout(() => {
+            observer.disconnect();
+            Logger.log('Stopped observing for new iframes');
+        }, 10000);
     }
 
     /**
-     * Sets up event listeners for dialog triggers
+     * Initialize iframe handling
      */
-    function setupDialogTriggerHandlers() {
+    function initializeIframeHandling() {
+        $(document).off('click', '.' + CONFIG.dialogTriggerClass);
+        
         $(document).on('click', '.' + CONFIG.dialogTriggerClass, function(e) {
-            Logger.log("Dialog trigger clicked");
-            waitForCommentIframeContent();
+            Logger.log('Dialog trigger clicked');
+            handleDialogTrigger();
         });
 
-        Logger.log("Dialog trigger handlers setup complete");
+        Logger.log('Dialog trigger handlers initialized');
     }
-
-    // ========== Initialization ==========
 
     /**
      * Initialize all functionality
@@ -302,13 +324,8 @@ AJS.toInit(function($) {
     async function initializeAll() {
         try {
             Logger.log('Starting initialization...');
-            
-            // Initialize table formatting
             await formatTable();
-            
-            // Setup iframe handlers
-            setupDialogTriggerHandlers();
-            
+            initializeIframeHandling();
             Logger.log('All initializations complete');
         } catch (error) {
             Logger.error('Error during initialization:', error);
