@@ -1,15 +1,14 @@
 /**
  * Confluence Table Formatter Module
- * Version: 1.0.0
+ * Version: 1.1.0
  * Purpose: Format dates and reviewer information in Confluence tables
  * 
- * Commit Message: Initial implementation of robust table formatter with error handling
+ * Commit Message: Fixed date validation and restored reviewer formatting
  * Changes:
- * - Implemented robust date parsing and formatting
- * - Added comprehensive error handling
- * - Added detailed logging system
- * - Implemented table element validation
- * - Added retry mechanism for table formatting
+ * - Fixed date validation to handle more formats including "MMM DD, YYYY"
+ * - Restored reviewer formatting functionality
+ * - Added better handling for dummy date
+ * - Improved error logging for date parsing
  */
 
 AJS.toInit(function($) {
@@ -20,14 +19,10 @@ AJS.toInit(function($) {
     const CONFIG = {
         tableId: "Ownership\\&Scope",
         dateFields: ["SOP Next Review Date", "Last Review Date"],
+        reviewerField: "Last Reviewed By",
         maxRetries: 3,
         retryDelay: 1000, // milliseconds
-        validDatePatterns: [
-            /^\d{4}-\d{2}-\d{2}$/, // yyyy-mm-dd
-            /^\d{2}-\d{2}-\d{4}$/, // dd-mm-yyyy
-            /^\d{2}\/\d{2}\/\d{4}$/, // dd/mm/yyyy
-            /^\d{4}\/\d{2}\/\d{2}$/, // yyyy/mm/dd
-        ]
+        dummyDate: "1970-01-01"
     };
 
     /**
@@ -49,55 +44,28 @@ AJS.toInit(function($) {
     };
 
     /**
-     * Validates and normalizes date strings
-     * @param {string} dateString - The date string to validate
-     * @returns {Object} - Object containing validation result and normalized date
-     */
-    function validateDateString(dateString) {
-        if (!dateString || typeof dateString !== 'string') {
-            return { isValid: false, normalizedDate: null };
-        }
-
-        const trimmedDate = dateString.trim();
-        if (!trimmedDate || trimmedDate === '1970-01-01') {
-            return { isValid: false, normalizedDate: null };
-        }
-
-        // Check against valid date patterns
-        const isValidPattern = CONFIG.validDatePatterns.some(pattern => 
-            pattern.test(trimmedDate)
-        );
-
-        if (!isValidPattern) {
-            return { isValid: false, normalizedDate: null };
-        }
-
-        // Try to parse the date
-        const parsedDate = new Date(trimmedDate);
-        if (isNaN(parsedDate.getTime())) {
-            return { isValid: false, normalizedDate: null };
-        }
-
-        return { 
-            isValid: true, 
-            normalizedDate: parsedDate 
-        };
-    }
-
-    /**
      * Converts date format to a standardized string
      * @param {string} dateString - The date string to convert
      * @returns {string} - Formatted date string or empty string if invalid
      */
     function convertDateFormat(dateString) {
         try {
-            const { isValid, normalizedDate } = validateDateString(dateString);
-            
-            if (!isValid) {
-                Logger.log(`Invalid date string received: ${dateString}`);
+            // Handle empty or dummy date
+            if (!dateString || !dateString.trim() || dateString.trim() === CONFIG.dummyDate) {
+                Logger.log('Empty or dummy date received');
                 return '';
             }
 
+            // Try parsing the date
+            const date = new Date(dateString);
+            
+            // Check if date is valid
+            if (isNaN(date.getTime())) {
+                Logger.error('Invalid date format:', dateString);
+                return dateString; // Return original if parsing fails
+            }
+
+            // Format the date
             const options = { 
                 year: 'numeric', 
                 month: 'short', 
@@ -105,7 +73,7 @@ AJS.toInit(function($) {
                 timeZone: 'UTC' // Ensure consistent timezone handling
             };
 
-            return normalizedDate
+            return date
                 .toLocaleDateString('en-US', options)
                 .replace(/,/g, '')
                 .replace(/(\w+) (\d+) (\d+)/, '$1 $2, $3');
@@ -113,6 +81,29 @@ AJS.toInit(function($) {
         } catch (error) {
             Logger.error('Error in convertDateFormat:', error);
             return dateString; // Return original string if conversion fails
+        }
+    }
+
+    /**
+     * Formats the reviewer field by removing brackets and '~' character
+     * @param {jQuery} reviewerCell - jQuery element containing reviewer information
+     */
+    function formatReviewer(reviewerCell) {
+        try {
+            if (!reviewerCell || !reviewerCell.length) {
+                Logger.error('Reviewer cell not found');
+                return;
+            }
+
+            let reviewerContent = reviewerCell.html();
+            if (reviewerContent) {
+                // Remove [~ and ] from reviewer content
+                reviewerContent = reviewerContent.replace(/^\[~/, '').replace(/\]$/, '');
+                reviewerCell.html(reviewerContent);
+                Logger.log('Reviewer field formatted successfully');
+            }
+        } catch (error) {
+            Logger.error('Error formatting reviewer:', error);
         }
     }
 
@@ -159,12 +150,14 @@ AJS.toInit(function($) {
             const originalDate = dateCellContent.text().trim();
             const newDate = convertDateFormat(originalDate);
 
+            Logger.log(`Processing ${fieldName}:`, {
+                original: originalDate,
+                formatted: newDate
+            });
+
             if (newDate !== originalDate) {
                 dateCellContent.text(newDate);
-                Logger.log(`Formatted ${fieldName}:`, {
-                    original: originalDate,
-                    formatted: newDate
-                });
+                Logger.log(`Formatted ${fieldName} successfully`);
             }
 
             return true;
@@ -193,9 +186,19 @@ AJS.toInit(function($) {
                 throw new Error('Table validation failed after max retries');
             }
 
+            // Format date fields
             const formattingResults = CONFIG.dateFields.map(fieldName => 
                 formatDateField(table, fieldName)
             );
+
+            // Format reviewer field
+            const reviewerRow = table.find(`th span:contains("${CONFIG.reviewerField}")`).closest('tr');
+            if (reviewerRow.length) {
+                const reviewerCell = reviewerRow.find('td p span span');
+                formatReviewer(reviewerCell);
+            } else {
+                Logger.error('Reviewer row not found');
+            }
 
             const successCount = formattingResults.filter(Boolean).length;
             Logger.log(`Table formatting completed. ${successCount}/${CONFIG.dateFields.length} fields processed`);
