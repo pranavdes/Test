@@ -1,13 +1,14 @@
 /**
- * Confluence Table and Iframe Handler
- * Version: 2.0.0
+ * Confluence Formatter Module
+ * Version: 2.1.0
  * Purpose: Format tables and handle iframe content in Confluence pages
  * 
- * Commit Message: Complete implementation with table formatting and iframe handling
+ * Commit Message: Complete implementation with table formatting and dynamic iframe handling
  * Changes:
- * - Combined table formatting and iframe handling
- * - Added comprehensive error handling and logging
- * - Improved code organization and documentation
+ * - Combined table formatting with improved iframe handling
+ * - Added proper dialog trigger detection
+ * - Improved iframe content handling timing
+ * - Enhanced error handling and logging
  */
 
 AJS.toInit(function($) {
@@ -16,15 +17,19 @@ AJS.toInit(function($) {
 
     // Configuration object for easy maintenance
     const CONFIG = {
+        // Table formatting config
         tableId: "Ownership\\&Scope",
         dateFields: ["SOP Next Review Date", "Last Review Date"],
         reviewerField: "Last Reviewed By",
         maxRetries: 3,
         retryDelay: 1000, // milliseconds
         dummyDate: "1970-01-01",
+        
+        // Iframe handling config
+        dialogTriggerClass: 'cw-byline__dialog-trigger',
         iframe: {
             maxAttempts: 10,
-            checkInterval: 500, // milliseconds
+            checkInterval: 300, // milliseconds
             selectors: {
                 durationFormat: 'div[class^="FieldDuration_formatSelector"]'
             }
@@ -48,6 +53,8 @@ AJS.toInit(function($) {
             error ? console.error(errorMessage, error) : console.error(errorMessage);
         }
     };
+
+    // ========== Table Formatting Functions ==========
 
     /**
      * Converts date format to a standardized string
@@ -174,93 +181,6 @@ AJS.toInit(function($) {
     }
 
     /**
-     * Handles hiding the duration selector in the iframe
-     * @param {HTMLIFrameElement} iframe - The iframe element
-     */
-    function hideDurationSelector(iframe) {
-        try {
-            const $iframe = $(iframe);
-            const $iframeContent = $iframe.contents();
-            const $durationSelector = $iframeContent.find('div[class^="FieldDuration_formatSelector"]');
-            
-            if ($durationSelector.length) {
-                $durationSelector.hide();
-                Logger.log('Successfully hid duration selector');
-            } else {
-                Logger.error('Duration selector not found in iframe');
-            }
-        } catch (error) {
-            Logger.error('Error hiding duration selector:', error);
-        }
-    }
-
-    /**
-     * Waits for iframe content to be ready
-     * @param {HTMLIFrameElement} iframe - The iframe element
-     * @returns {Promise} - Resolves when content is ready
-     */
-    function waitForIframeContent(iframe) {
-        return new Promise((resolve, reject) => {
-            let attempts = 0;
-            
-            const checkContent = () => {
-                try {
-                    const $iframe = $(iframe);
-                    const $iframeContent = $iframe.contents();
-                    const $body = $iframeContent.find('body');
-                    
-                    if ($body.length) {
-                        resolve(iframe);
-                    } else if (attempts < CONFIG.iframe.maxAttempts) {
-                        attempts++;
-                        setTimeout(checkContent, CONFIG.iframe.checkInterval);
-                    } else {
-                        reject(new Error('Iframe content not loaded after max attempts'));
-                    }
-                } catch (error) {
-                    reject(error);
-                }
-            };
-            
-            checkContent();
-        });
-    }
-
-    /**
-     * Sets up iframe observers and handlers
-     */
-    function setupIframeHandlers() {
-        const observer = new MutationObserver((mutations) => {
-            mutations.forEach((mutation) => {
-                if (mutation.addedNodes) {
-                    mutation.addedNodes.forEach((node) => {
-                        if (node.tagName === 'IFRAME') {
-                            Logger.log('New iframe detected');
-                            
-                            $(node).on('load', function() {
-                                waitForIframeContent(this)
-                                    .then((iframe) => {
-                                        hideDurationSelector(iframe);
-                                    })
-                                    .catch((error) => {
-                                        Logger.error('Error handling iframe:', error);
-                                    });
-                            });
-                        }
-                    });
-                }
-            });
-        });
-
-        observer.observe(document.body, {
-            childList: true,
-            subtree: true
-        });
-
-        Logger.log('Iframe handlers setup complete');
-    }
-
-    /**
      * Main function to format the table
      * @param {number} retryCount - Number of retry attempts
      * @returns {Promise} - Resolves when formatting is complete
@@ -303,16 +223,91 @@ AJS.toInit(function($) {
         }
     }
 
+    // ========== Iframe Handling Functions ==========
+
+    /**
+     * Handles hiding the duration selector in the iframe
+     * @param {HTMLIFrameElement} iframe - The iframe element
+     */
+    function hideDurationSelector(iframe) {
+        try {
+            const $iframe = $(iframe);
+            const $iframeContent = $iframe.contents();
+            const $durationSelector = $iframeContent.find(CONFIG.iframe.selectors.durationFormat);
+            
+            if ($durationSelector.length) {
+                Logger.log('Found duration selector, hiding it');
+                $durationSelector.hide();
+                Logger.log('Successfully hid duration selector');
+            } else {
+                Logger.error('Duration selector not found in iframe');
+            }
+        } catch (error) {
+            Logger.error('Error hiding duration selector:', error);
+        }
+    }
+
+    /**
+     * Waits for and handles iframe content
+     */
+    function waitForCommentIframeContent() {
+        Logger.log("Starting to watch for iframe content...");
+        let attempts = 0;
+        
+        function checkForIframe() {
+            const $iframe = $('iframe').filter(function() {
+                try {
+                    // Check if we can access iframe contents (same origin)
+                    return $(this).contents().find('body').length > 0;
+                } catch (e) {
+                    return false;
+                }
+            });
+
+            if ($iframe.length > 0) {
+                Logger.log("Found iframe, processing content");
+                hideDurationSelector($iframe[0]);
+                return true;
+            } else if (attempts < CONFIG.iframe.maxAttempts) {
+                attempts++;
+                Logger.log(`Iframe not found, attempt ${attempts}/${CONFIG.iframe.maxAttempts}`);
+                setTimeout(checkForIframe, CONFIG.iframe.checkInterval);
+                return false;
+            } else {
+                Logger.error("Failed to find iframe after maximum attempts");
+                return false;
+            }
+        }
+
+        checkForIframe();
+    }
+
+    /**
+     * Sets up event listeners for dialog triggers
+     */
+    function setupDialogTriggerHandlers() {
+        $(document).on('click', '.' + CONFIG.dialogTriggerClass, function(e) {
+            Logger.log("Dialog trigger clicked");
+            waitForCommentIframeContent();
+        });
+
+        Logger.log("Dialog trigger handlers setup complete");
+    }
+
+    // ========== Initialization ==========
+
     /**
      * Initialize all functionality
      */
     async function initializeAll() {
         try {
+            Logger.log('Starting initialization...');
+            
             // Initialize table formatting
             await formatTable();
             
             // Setup iframe handlers
-            setupIframeHandlers();
+            setupDialogTriggerHandlers();
             
             Logger.log('All initializations complete');
         } catch (error) {
