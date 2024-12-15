@@ -1,14 +1,13 @@
 /**
- * Confluence Table Formatter Module
- * Version: 1.1.0
- * Purpose: Format dates and reviewer information in Confluence tables
+ * Confluence Table and Iframe Handler
+ * Version: 2.0.0
+ * Purpose: Format tables and handle iframe content in Confluence pages
  * 
- * Commit Message: Fixed date validation and restored reviewer formatting
+ * Commit Message: Complete implementation with table formatting and iframe handling
  * Changes:
- * - Fixed date validation to handle more formats including "MMM DD, YYYY"
- * - Restored reviewer formatting functionality
- * - Added better handling for dummy date
- * - Improved error logging for date parsing
+ * - Combined table formatting and iframe handling
+ * - Added comprehensive error handling and logging
+ * - Improved code organization and documentation
  */
 
 AJS.toInit(function($) {
@@ -22,7 +21,14 @@ AJS.toInit(function($) {
         reviewerField: "Last Reviewed By",
         maxRetries: 3,
         retryDelay: 1000, // milliseconds
-        dummyDate: "1970-01-01"
+        dummyDate: "1970-01-01",
+        iframe: {
+            maxAttempts: 10,
+            checkInterval: 500, // milliseconds
+            selectors: {
+                durationFormat: 'div.FieldDuration_formatSelector'
+            }
+        }
     };
 
     /**
@@ -168,6 +174,93 @@ AJS.toInit(function($) {
     }
 
     /**
+     * Handles hiding the duration selector in the iframe
+     * @param {HTMLIFrameElement} iframe - The iframe element
+     */
+    function hideDurationSelector(iframe) {
+        try {
+            const $iframe = $(iframe);
+            const $iframeContent = $iframe.contents();
+            const $durationSelector = $iframeContent.find(CONFIG.iframe.selectors.durationFormat);
+            
+            if ($durationSelector.length) {
+                $durationSelector.hide();
+                Logger.log('Successfully hid duration selector');
+            } else {
+                Logger.error('Duration selector not found in iframe');
+            }
+        } catch (error) {
+            Logger.error('Error hiding duration selector:', error);
+        }
+    }
+
+    /**
+     * Waits for iframe content to be ready
+     * @param {HTMLIFrameElement} iframe - The iframe element
+     * @returns {Promise} - Resolves when content is ready
+     */
+    function waitForIframeContent(iframe) {
+        return new Promise((resolve, reject) => {
+            let attempts = 0;
+            
+            const checkContent = () => {
+                try {
+                    const $iframe = $(iframe);
+                    const $iframeContent = $iframe.contents();
+                    const $body = $iframeContent.find('body');
+                    
+                    if ($body.length) {
+                        resolve(iframe);
+                    } else if (attempts < CONFIG.iframe.maxAttempts) {
+                        attempts++;
+                        setTimeout(checkContent, CONFIG.iframe.checkInterval);
+                    } else {
+                        reject(new Error('Iframe content not loaded after max attempts'));
+                    }
+                } catch (error) {
+                    reject(error);
+                }
+            };
+            
+            checkContent();
+        });
+    }
+
+    /**
+     * Sets up iframe observers and handlers
+     */
+    function setupIframeHandlers() {
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach((mutation) => {
+                if (mutation.addedNodes) {
+                    mutation.addedNodes.forEach((node) => {
+                        if (node.tagName === 'IFRAME') {
+                            Logger.log('New iframe detected');
+                            
+                            $(node).on('load', function() {
+                                waitForIframeContent(this)
+                                    .then((iframe) => {
+                                        hideDurationSelector(iframe);
+                                    })
+                                    .catch((error) => {
+                                        Logger.error('Error handling iframe:', error);
+                                    });
+                            });
+                        }
+                    });
+                }
+            });
+        });
+
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+
+        Logger.log('Iframe handlers setup complete');
+    }
+
+    /**
      * Main function to format the table
      * @param {number} retryCount - Number of retry attempts
      * @returns {Promise} - Resolves when formatting is complete
@@ -210,9 +303,23 @@ AJS.toInit(function($) {
         }
     }
 
-    // Initialize the formatter
-    Logger.log('Initializing table formatter...');
-    formatTable().then(success => {
-        Logger.log(`Table formatter initialization ${success ? 'successful' : 'failed'}`);
-    });
+    /**
+     * Initialize all functionality
+     */
+    async function initializeAll() {
+        try {
+            // Initialize table formatting
+            await formatTable();
+            
+            // Setup iframe handlers
+            setupIframeHandlers();
+            
+            Logger.log('All initializations complete');
+        } catch (error) {
+            Logger.error('Error during initialization:', error);
+        }
+    }
+
+    // Start initialization
+    initializeAll();
 });
