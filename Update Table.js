@@ -26,7 +26,7 @@ AJS.toInit(function($) {
             maxAttempts: 10,
             checkInterval: 500, // milliseconds
             selectors: {
-                durationFormat: 'div.FieldDuration_formatSelector'
+                durationFormat: 'div[class^="FieldDuration_formatSelector"]'
             }
         }
     };
@@ -181,7 +181,7 @@ AJS.toInit(function($) {
         try {
             const $iframe = $(iframe);
             const $iframeContent = $iframe.contents();
-            const $durationSelector = $iframeContent.find(CONFIG.iframe.selectors.durationFormat);
+            const $durationSelector = $iframeContent.find('div[class^="FieldDuration_formatSelector"]');
             
             if ($durationSelector.length) {
                 $durationSelector.hide();
