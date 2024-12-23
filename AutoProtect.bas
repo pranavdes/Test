@@ -1,82 +1,132 @@
-Option Explicit
 '***********************************************************************
-' Hold your horses! Before you dive in...
+' Class Module: CSheetState
 '
-' This is the heart of our Excel Protection Manager. I've built this after 
-' dealing with countless protection-related headaches in enterprise environments.
-' 
-' What does this bad boy do?
-' - Keeps track of which sheets should be protected
-' - Handles protection state with military-grade security (well, almost!)
-' - Doesn't let users forget to protect their sheets
-' - Works smoothly even when AutoSave tries to mess things up
+' Purpose: Tracks an individual worksheet's protection state and history.
+' After dealing with users repeatedly forgetting to re-protect sheets, This
+' class has been to maintain a reliable protection state system.
+'
+' Why a class instead of a Type?
+' Originally tried using a Type but ran into issues with Variants and
+' Dictionary objects. This class approach is much more robust and gives
+' us better control over the data.
 '
 ' Author     : Pranav Desai
 ' Department : Finance Control & Oversight
-' Version    : 2.0.0 
-' Last Update: December 2024
+' Created    : December 2024
+'***********************************************************************
+Option Explicit
+
+' Member variables - using m_ prefix to easily spot them in the code
+Private m_IsProtected As Boolean    ' Should this sheet be locked?
+Private m_LastChanged As Date       ' When was protection last changed?
+Private m_ChangeCount As Integer    ' How many times has it been modified?
+Private m_Checksum As String        ' Hash to detect unauthorized changes
+
+' IsProtected - Tracks whether this sheet should be protected
+Public Property Get isProtected() As Boolean
+    isProtected = m_IsProtected
+End Property
+
+Public Property Let isProtected(value As Boolean)
+    m_IsProtected = value
+End Property
+
+' LastChanged - When the protection was last modified
+' Helps us track how long a sheet has been in its current state
+Public Property Get LastChanged() As Date
+    LastChanged = m_LastChanged
+End Property
+
+Public Property Let LastChanged(value As Date)
+    m_LastChanged = value
+End Property
+
+' ChangeCount - Number of protection changes
+' Too many changes might indicate someone trying to mess with the sheet
+Public Property Get ChangeCount() As Integer
+    ChangeCount = m_ChangeCount
+End Property
+
+Public Property Let ChangeCount(value As Integer)
+    m_ChangeCount = value
+End Property
+
+' Checksum - Security hash of current state
+' Helps detect if someone bypassed our code to change protection
+Public Property Get Checksum() As String
+    Checksum = m_Checksum
+End Property
+
+Public Property Let Checksum(value As String)
+    m_Checksum = value
+End Property
+
+Option Explicit
+'***********************************************************************
+' Excel Protection Manager
 '
-' P.S.: If something breaks, you know who to blame ;)
+' What does this do?
+' Automatically manages worksheet protection in our workbooks. Born from
+' the constant headache of users unprotecting sheets for updates but
+' forgetting to re-protect them. This system tracks protection states
+' and makes sure everything gets locked down properly.
+'
+' Key Features:
+' - Remembers which sheets should be protected
+' - Automatically re-protects sheets when the workbook closes
+' - Handles network timeouts and retries
+' - Works with AutoSave without conflicts
+' - Keeps detailed logs for troubleshooting
+' - Processes sheets in batches to avoid Excel freezing
+'
+' Author     : Pranav Desai
+' Department : Finance Control & Oversight
+' Created    : December 2024
+' Version    : 2.0.0
+'
+' Warning: Remember to change PROTECTION_KEY before deploying!
 '***********************************************************************
 
-'==== API Declarations ====
+'==== Windows API Declarations ====
 #If VBA7 Then
-    ' For 64-bit Office
+    ' For 64-bit Office (most modern installations)
     Private Declare PtrSafe Sub Sleep Lib "kernel32" (ByVal dwMilliseconds As LongPtr)
-    Private Declare PtrSafe Function CryptProtectData Lib "Crypt32.dll" ( _
-        ByRef DataIn As Any, ByVal szDataDescr As Long, _
-        ByRef OptionalEntropy As Any, ByRef pvReserved As Any, _
-        ByRef pPromptStruct As Any, ByVal dwFlags As Long, _
-        ByRef DataOut As Any) As Long
 #Else
-    ' For older Office versions - if you're still using this, we need to talk!
+    ' For legacy 32-bit Office (keeping for backwards compatibility)
     Private Declare Sub Sleep Lib "kernel32" (ByVal dwMilliseconds As Long)
 #End If
 
-'==== Constants ====
-' Don't touch these unless you know what you're doing!
+'==== Configuration Settings ====
+' I've made these constants easy to find and modify
+' Adjust these based on your needs, but test thoroughly after changes!
 Private Const MODULE_VERSION As String = "2.0.0"
-Private Const PROTECTION_KEY As String = "YourSecurePassword123" ' Change this!
+Private Const PROTECTION_KEY As String = "YourSecurePassword123" ' CHANGE THIS!
 Private Const DEBUG_MODE As Boolean = True    ' Set False in production
-Private Const MAX_RETRIES As Integer = 3      ' How patient should we be?
-Private Const RETRY_DELAY_MS As Integer = 1000 ' Give it a breather between retries
-Private Const BATCH_SIZE As Integer = 5       ' How many sheets to process at once
-Private Const SESSION_TIMEOUT_MS As Long = 30000 ' Half a minute should do it
-Private Const CHECKSUM_SALT As String = "FC&O_2024"  ' Our secret sauce
+Private Const MAX_RETRIES As Integer = 3      ' Good balance for network issues
+Private Const RETRY_DELAY_MS As Integer = 1000 ' 1 second between retries
+Private Const BATCH_SIZE As Integer = 5       ' Process 5 sheets at a time
+Private Const SESSION_TIMEOUT_MS As Long = 30000 ' 30 sec timeout
+Private Const CHECKSUM_SALT As String = "FC&O_2024" ' Makes checksums unique
 
-'==== Enums and Types ====
-Private Enum ProtectionResult
-    PR_SUCCESS = 0
-    PR_FAILED = 1
-    PR_RETRY_NEEDED = 2
-    PR_TIMEOUT = 3
-End Enum
-
-Private Type SheetState
-    IsProtected As Boolean    ' Should this sheet be locked down?
-    LastChanged As Date       ' When did we last touch it?
-    ChangeCount As Integer    ' How many times has it been modified?
-    Checksum As String       ' Our integrity check
-End Type
-
-'==== State Tracking ====
+'==== Global Variables ====
+' Using object variables for flexibility
 Private protectionStates As Object    ' Dictionary of sheet states
-Private sessionID As String           ' Unique session identifier
-Private isInitialized As Boolean      ' Have we set everything up?
-Private changeLog As Object           ' For when things go wrong (they will)
-Private lastOperationTime As Date     ' Timeout tracking
+Private sessionID As String           ' Unique ID for this session
+Private isInitialized As Boolean      ' System setup flag
+Private changeLog As Object           ' Operation logging
+Private lastOperationTime As Date     ' For timeout detection
 
 '***********************************************************************
-' Workbook_Open
-' 
-' The party starts here! This runs whenever someone opens the workbook.
+' Core Event Handlers
 '***********************************************************************
+
 Private Sub Workbook_Open()
+    ' This kicks off when someone opens the workbook
+    ' Added error handling after seeing some weird startup issues
     On Error GoTo ErrorHandler
     
     If Not isInitialized Then
         InitializeProtectionSystem
-        ValidateWorkbookState
         isInitialized = True
         
         If DEBUG_MODE Then Debug.Print "Protection system initialized. Session: " & sessionID
@@ -84,53 +134,56 @@ Private Sub Workbook_Open()
     Exit Sub
 
 ErrorHandler:
-    HandleInitializationError Err.Number, Err.Description
+    LogError "Workbook_Open", Err.Number, Err.Description
 End Sub
 
-'***********************************************************************
-' Workbook_BeforeClose
-'
-' The cleanup crew. Makes sure nothing's left unprotected.
-'***********************************************************************
 Private Sub Workbook_BeforeClose(Cancel As Boolean)
+    ' This is where we do our main protection check before the workbook closes
     On Error GoTo ErrorHandler
     
+    ' Make sure our tracking system is still alive
     If Not ValidateSystemState Then
         ReinitializeIfNeeded
     End If
     
+    ' To handle specific scneario around Autosave
     If IsAutoSaveActive Then
         HandleAutoSaveScenario
     End If
     
+    ' Do our protection check
     Dim success As Boolean
     success = SecureWorkbookOnClose
     
+    ' If we made changes, we need to save them
     If success And NeedToSave Then
         SaveWorkbookSecurely Cancel
     End If
     
+    ' Clean up after ourselves - prevents memory leaks
     CleanupProtectionSystem
     Exit Sub
 
 ErrorHandler:
+    ' Log it but let the workbook close anyway
     LogError "Workbook_BeforeClose", Err.Number, Err.Description
     Cancel = False
 End Sub
 
 '***********************************************************************
-' InitializeProtectionSystem
-'
-' Sets up our security fortress. This is the foundation of everything.
+' Core Protection Functions
 '***********************************************************************
+
 Private Sub InitializeProtectionSystem()
+    ' Sets up our protection tracking system
+    ' Separated this from Workbook_Open to make it reusable
     On Error GoTo ErrorHandler
     
     sessionID = CreateSessionID
     Set protectionStates = CreateObject("Scripting.Dictionary")
     Set changeLog = CreateObject("Scripting.Dictionary")
     
-    LoadSecureSettings
+    ' Scan current protection states
     ScanAndStoreSheetStates
     lastOperationTime = Now
     
@@ -146,52 +199,66 @@ ErrorHandler:
     RaiseSecurityAlert "System Initialization Failed"
 End Sub
 
-'***********************************************************************
-' Security Implementation Functions
-'***********************************************************************
 Private Function CreateSessionID() As String
-    ' Generate a unique session identifier
+    ' Creates a unique ID for this session
+    ' Format: YYYYMMDDHHNNSS_XXX where XXX is random
+    ' Really helps when tracking down issues in the logs
     CreateSessionID = Format(Now, "yyyymmddhhnnss") & "_" & _
                      Hex$(Int((1000 * Rnd) + 1))
 End Function
 
-Private Function CalculateSheetChecksum(ws As Worksheet) As String
-    ' Create a unique fingerprint for the sheet's state
-    Dim checkString As String
-    checkString = ws.Name & "|" & ws.ProtectContents & "|" & CHECKSUM_SALT
-    
-    Dim i As Integer, Sum As Long
-    For i = 1 To Len(checkString)
-        Sum = Sum + (Asc(Mid(checkString, i, 1)) * i)
-    Next i
-    
-    CalculateSheetChecksum = Hex$(Sum)
-End Function
-
-Private Sub UpdateSheetState(sheetName As String, isProtected As Boolean)
-    If protectionStates.Exists(sheetName) Then
-        Dim state As SheetState
-        state = protectionStates(sheetName)
-        
-        With state
-            .IsProtected = isProtected
-            .LastChanged = Now
-            .ChangeCount = .ChangeCount + 1
-            .Checksum = CalculateSheetChecksum(ThisWorkbook.Sheets(sheetName))
-        End With
-        
-        protectionStates(sheetName) = state
-    End If
-End Sub
-
-'***********************************************************************
-' Core Protection Functions
-'***********************************************************************
-Private Function SecureWorkbookOnClose() As Boolean
+Private Sub ScanAndStoreSheetStates()
+    ' Takes a snapshot of all sheets' protection states
+    ' Added batch processing after seeing timeouts with large workbooks
     On Error GoTo ErrorHandler
     
     Dim ws As Worksheet
-    Dim stateInfo As SheetState
+    Dim stateInfo As CSheetState
+    Dim sheetCount As Integer
+    
+    For Each ws In ThisWorkbook.Worksheets
+        Set stateInfo = New CSheetState
+        
+        ' Record current state
+        With stateInfo
+            .isProtected = ws.ProtectContents
+            .LastChanged = Now
+            .ChangeCount = 0
+            .Checksum = CalculateSheetChecksum(ws)
+        End With
+        
+        ' Add to tracking if not already there
+        If Not protectionStates.Exists(ws.Name) Then
+            protectionStates.Add ws.Name, stateInfo
+        End If
+        
+        ' Batch processing to prevent Excel from hanging
+        sheetCount = sheetCount + 1
+        If sheetCount Mod BATCH_SIZE = 0 Then
+            DoEvents
+            Sleep RETRY_DELAY_MS
+        End If
+        
+        If DEBUG_MODE Then
+            Debug.Print "Registered sheet: " & ws.Name & _
+                      " Protection: " & ws.ProtectContents
+        End If
+    Next ws
+    
+    Exit Sub
+
+ErrorHandler:
+    LogError "ScanAndStoreSheetStates", Err.Number, _
+            "Failed while scanning sheet states"
+End Sub
+
+Private Function SecureWorkbookOnClose() As Boolean
+    ' This is our main protection enforcer
+    ' Checks and re-protects sheets as needed
+    On Error GoTo ErrorHandler
+    
+    Dim ws As Worksheet
+    Dim stateInfo As CSheetState
     Dim allSecured As Boolean
     allSecured = True
     
@@ -200,9 +267,10 @@ Private Function SecureWorkbookOnClose() As Boolean
     
     For Each ws In ThisWorkbook.Worksheets
         If protectionStates.Exists(ws.Name) Then
-            stateInfo = protectionStates(ws.Name)
+            Set stateInfo = protectionStates(ws.Name)
             
-            If stateInfo.IsProtected And Not ws.ProtectContents Then
+            ' Check if this sheet needs protection
+            If stateInfo.isProtected And Not ws.ProtectContents Then
                 If Not ApplyProtection(ws) Then
                     allSecured = False
                     LogError "SecureWorkbookOnClose", 0, _
@@ -210,6 +278,7 @@ Private Function SecureWorkbookOnClose() As Boolean
                 End If
             End If
             
+            ' Process in batches to keep Excel responsive
             sheetCount = sheetCount + 1
             If sheetCount Mod BATCH_SIZE = 0 Then
                 DoEvents
@@ -227,6 +296,8 @@ ErrorHandler:
 End Function
 
 Private Function ApplyProtection(ws As Worksheet) As Boolean
+    ' Applies protection to a single worksheet
+    ' Added retry logic after seeing network drive issues
     On Error GoTo ErrorHandler
     
     Dim retryCount As Integer
@@ -234,32 +305,33 @@ Private Function ApplyProtection(ws As Worksheet) As Boolean
     success = False
     
     Do While retryCount < MAX_RETRIES And Not success
-        Try
-            ws.Protect _
-                Password:=PROTECTION_KEY, _
-                DrawingObjects:=True, _
-                Contents:=True, _
-                Scenarios:=True, _
-                UserInterfaceOnly:=True, _
-                AllowFiltering:=True, _
-                AllowFormattingCells:=False, _
-                AllowFormattingColumns:=False, _
-                AllowFormattingRows:=False, _
-                AllowInsertingColumns:=False, _
-                AllowInsertingRows:=False, _
-                AllowInsertingHyperlinks:=False, _
-                AllowDeletingColumns:=False, _
-                AllowDeletingRows:=False, _
-                AllowSorting:=True, _
-                AllowUsingPivotTables:=True
-                
-            success = True
-            UpdateSheetState ws.Name, True
+        ' These protection settings worked best for our needs
+        ' Adjust them based on what your users need to do
+        ws.Protect _
+            Password:=PROTECTION_KEY, _
+            DrawingObjects:=True, _
+            Contents:=True, _
+            Scenarios:=True, _
+            UserInterfaceOnly:=True, _
+            AllowFiltering:=True, _
+            AllowFormattingCells:=False, _
+            AllowFormattingColumns:=False, _
+            AllowFormattingRows:=False, _
+            AllowInsertingColumns:=False, _
+            AllowInsertingRows:=False, _
+            AllowInsertingHyperlinks:=False, _
+            AllowDeletingColumns:=False, _
+            AllowDeletingRows:=False, _
+            AllowSorting:=True, _
+            AllowUsingPivotTables:=True
             
-        Catch
+        success = True
+        UpdateSheetState ws.Name, True
+        
+        If Not success Then
             retryCount = retryCount + 1
             If retryCount < MAX_RETRIES Then Sleep RETRY_DELAY_MS
-        End Try
+        End If
     Loop
     
     ApplyProtection = success
@@ -274,7 +346,39 @@ End Function
 '***********************************************************************
 ' Helper Functions
 '***********************************************************************
+
+Private Function CalculateSheetChecksum(ws As Worksheet) As String
+    ' Creates a "fingerprint" of the sheet's protection state
+    ' Helps detect if someone bypassed our code to change protection
+    Dim checkString As String
+    checkString = ws.Name & "|" & ws.ProtectContents & "|" & CHECKSUM_SALT
+    
+    Dim i As Integer, Sum As Long
+    For i = 1 To Len(checkString)
+        Sum = Sum + (Asc(Mid(checkString, i, 1)) * i)
+    Next i
+    
+    CalculateSheetChecksum = Hex$(Sum)
+End Function
+
+Private Sub UpdateSheetState(sheetName As String, isProtected As Boolean)
+    ' Updates our tracking info for a sheet
+    If protectionStates.Exists(sheetName) Then
+        Dim state As CSheetState
+        Set state = protectionStates(sheetName)
+        
+        With state
+            .isProtected = isProtected
+            .LastChanged = Now
+            .ChangeCount = .ChangeCount + 1
+            .Checksum = CalculateSheetChecksum(ThisWorkbook.Sheets(sheetName))
+        End With
+    End If
+End Sub
+
 Private Sub LogError(procedure As String, errNumber As Long, errDescription As String)
+    ' Logs errors for troubleshooting
+    ' These logs have saved me countless hours of debugging
     If DEBUG_MODE Then
         Debug.Print "Error in " & procedure & ": [" & errNumber & "] " & errDescription
     End If
@@ -287,26 +391,33 @@ Private Sub LogError(procedure As String, errNumber As Long, errDescription As S
 End Sub
 
 Private Sub RaiseSecurityAlert(message As String)
-    ' Here you could implement your own alert system
+    ' Alerts about security issues
+    ' In production, you might want to email admins or log to a system
     If DEBUG_MODE Then Debug.Print "SECURITY ALERT: " & message
 End Sub
 
 Private Function IsAutoSaveActive() As Boolean
+    ' Checks if AutoSave is enabled
+    ' Added this after seeing issues with SharePoint
     On Error Resume Next
     IsAutoSaveActive = ThisWorkbook.AutoSaveOn
     On Error GoTo 0
 End Function
 
 Private Sub HandleAutoSaveScenario()
-    ' Implementation depends on your AutoSave handling strategy
+    ' Deals with AutoSave conflicts
+    ' Just a basic wait for now, but could be enhanced
     If DEBUG_MODE Then Debug.Print "AutoSave detected - handling conflicts"
+    Sleep RETRY_DELAY_MS
 End Sub
 
 Private Function ValidateSystemState() As Boolean
+    ' Makes sure our tracking system is still good
     ValidateSystemState = isInitialized And Not protectionStates Is Nothing
 End Function
 
 Private Sub ReinitializeIfNeeded()
+    ' Resets the system if something went wrong
     If Not ValidateSystemState Then
         InitializeProtectionSystem
         isInitialized = True
@@ -314,11 +425,13 @@ Private Sub ReinitializeIfNeeded()
 End Sub
 
 Private Function NeedToSave() As Boolean
-    ' Check if workbook has unsaved changes
+    ' Checks if we need to save changes
     NeedToSave = Not ThisWorkbook.Saved
 End Function
 
 Private Sub SaveWorkbookSecurely(ByRef Cancel As Boolean)
+    ' Handles saving the workbook
+    ' Added user prompt after complaints about auto-saving
     On Error GoTo ErrorHandler
     
     If ThisWorkbook.Saved Then
@@ -343,6 +456,7 @@ ErrorHandler:
 End Sub
 
 Private Sub CleanupProtectionSystem()
+    ' Cleans up our objects to prevent memory leaks
     If Not protectionStates Is Nothing Then
         protectionStates.RemoveAll
         Set protectionStates = Nothing
