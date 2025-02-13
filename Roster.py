@@ -35,6 +35,21 @@ def get_table_as_df(ws, table_name):
             return df
     raise ValueError(f"Table '{table_name}' not found on worksheet '{ws.title}'.")
 
+def get_working_dates(year, month, public_holidays):
+    """
+    Returns a list of working dates (datetime objects) for the given month and year,
+    excluding weekends (Sat/Sun) and any dates listed in public_holidays.
+    """
+    num_days = calendar.monthrange(year, month)[1]
+    all_dates = [datetime(year, month, day) for day in range(1, num_days + 1)]
+    
+    # Convert holiday dates to date objects for easy comparison
+    holiday_dates = set(pd.to_datetime(d).date() for d in public_holidays)
+    
+    # Monday=0, Sunday=6 => so <5 means Mon-Fri
+    working = [d for d in all_dates if d.weekday() < 5 and d.date() not in holiday_dates]
+    return working
+
 def parse_day_descriptor(descriptor):
     """
     Parses a descriptor like:
@@ -47,7 +62,7 @@ def parse_day_descriptor(descriptor):
 
     This function is more flexible: it ignores extra words like "Working".
     It looks for:
-      - One of {"1st", "2nd", "3rd", "4th", "last"} (case-insensitive)
+      - One of {"1st", "2nd", "3rd", "4th", "5th", "last"} (case-insensitive)
       - A weekday substring that starts with or matches any of
         ["mon", "tue", "wed", "thu", "fri"] or the full name.
     If it can't parse properly, returns (None, None).
@@ -55,18 +70,12 @@ def parse_day_descriptor(descriptor):
     descriptor = descriptor.strip().lower()
     tokens = descriptor.split()
     
-    # Potential patterns:
-    #   1) "1st" or "last" or "2nd", etc.
-    #   2) "working" or other filler
-    #   3) "tuesday" or "wed"
-    # We'll store occurrence in "occ" and weekday in "wday"
-    occ = None
-    wday = None
-    
-    # Helper sets
     valid_occurrences = {"1st", "2nd", "3rd", "4th", "5th", "last"}
     valid_short_days  = ["mon", "tue", "wed", "thu", "fri"]
     valid_full_days   = ["monday", "tuesday", "wednesday", "thursday", "friday"]
+    
+    occ = None
+    wday = None
     
     for token in tokens:
         # Check if token is an occurrence
@@ -74,22 +83,18 @@ def parse_day_descriptor(descriptor):
             occ = token
         else:
             # Check if token matches or starts with short day
-            # or matches a full day
-            # We'll do a simple approach: if token starts with mon/tue/wed/thu/fri or
-            # exactly matches monday/tuesday/wednesday/thursday/friday
             for sd in valid_short_days:
-                if token.startswith(sd):
-                    wday = sd  # "mon", "tue", etc.
+                if token.startswith(sd):  # e.g. "tue", "tuesday"
+                    wday = sd
                     break
+            # Check if token exactly matches a full day
             for fd in valid_full_days:
                 if token == fd:
-                    wday = fd  # "monday", "tuesday", etc.
+                    wday = fd
                     break
     
-    # If we found nothing, return (None, None)
     if not occ or not wday:
         return (None, None)
-    
     return (occ, wday)
 
 def matches_day_descriptor(date_obj, descriptor, working_dates):
@@ -99,49 +104,37 @@ def matches_day_descriptor(date_obj, descriptor, working_dates):
     """
     occ, wday = parse_day_descriptor(descriptor)
     if not occ or not wday:
-        return False  # can't parse the descriptor
+        return False
     
     # We'll unify the actual date's day-of-week to short or full
-    # date_obj.weekday() => Monday=0, Tuesday=1, ...
-    # We'll compare in a flexible way
-    actual_day_short = date_obj.strftime("%a").lower()  # e.g. "mon"
-    actual_day_full  = date_obj.strftime("%A").lower()  # e.g. "monday"
-    
-    # If the descriptor's wday is "mon" or "monday", check if date_obj is Monday
-    # We'll define a small mapping from short to numeric:
     short_map = {"mon":0, "tue":1, "wed":2, "thu":3, "fri":4}
     full_map  = {"monday":0, "tuesday":1, "wednesday":2, "thursday":3, "friday":4}
     
-    # Determine the numeric weekday from wday
     if wday in short_map:
         needed_wd = short_map[wday]
     elif wday in full_map:
         needed_wd = full_map[wday]
     else:
-        return False  # unexpected
+        return False
     
+    # If this date doesn't match the needed weekday, bail
     if date_obj.weekday() != needed_wd:
         return False
     
-    # If the day matches, figure out if it's the "1st", "2nd", "last", etc.
-    # Collect all working dates in the same month & year that match this weekday
+    # Collect all working dates in the same month & year with the same weekday
     same_wd_dates = [d for d in working_dates
                      if d.year == date_obj.year
                      and d.month == date_obj.month
                      and d.weekday() == needed_wd]
+    same_wd_dates.sort()
     
     if not same_wd_dates:
         return False
     
-    # Sort them ascending
-    same_wd_dates.sort()
-    
     if occ == "last":
         return date_obj == same_wd_dates[-1]
     else:
-        # "1st", "2nd", "3rd", "4th", "5th"
-        # We'll parse the numeric portion from "1st", "2nd", etc.
-        # ignoring "st", "nd", "rd", "th"
+        # "1st", "2nd", etc.
         digit_part = "".join([c for c in occ if c.isdigit()])
         if not digit_part.isdigit():
             return False
@@ -157,9 +150,6 @@ def generate_roster_schedule(excel_file):
       - Named cells: 'OfficePercentage' and 'TargetMonthYear'
       - Excel tables: 'EmployeeData', 'SeatData', 'PublicHolidays',
                       'SubTeamOfficeDays', 'SpecialSubTeamDays', 'SeatPreferences'.
-    This version:
-      - Parses descriptors like "1st Working Tuesday" or "Last Fri" more flexibly.
-      - Prints debug info each day to show available seats, special sub-team, and eligible employees.
     """
     try:
         wb = load_workbook(excel_file)
@@ -190,7 +180,6 @@ def generate_roster_schedule(excel_file):
         
         # 3. Determine working dates
         public_holiday_dates = df_public_holidays["Date"]
-        # Convert to list if needed
         working_dates = get_working_dates(year, month, public_holiday_dates)
         total_working_days = len(working_dates)
         
@@ -212,16 +201,14 @@ def generate_roster_schedule(excel_file):
         for _, seat_row in df_seats.iterrows():
             seat_code = seat_row["SeatCode"]
             seat_type = str(seat_row["SeatType"]).strip().lower()
-            # Normalize seat "Days"
             seat_days = [x.strip().lower() for x in str(seat_row["Days"]).split(",")]
             
             assigned_emp = seat_row.get("AssignedEmployeeID")
             
             if seat_type == "fixed" and pd.notna(assigned_emp):
                 for day in working_dates:
-                    # Check if day matches seat_days
-                    day_abbr = day.strftime("%a").lower()   # "mon"
-                    day_full = day.strftime("%A").lower()   # "monday"
+                    day_abbr = day.strftime("%a").lower()
+                    day_full = day.strftime("%A").lower()
                     
                     if day_abbr in seat_days or day_full in seat_days:
                         schedule[day][seat_code] = assigned_emp
@@ -249,35 +236,29 @@ def generate_roster_schedule(excel_file):
             special_subteam = None
             for _, sp_row in df_special_days.iterrows():
                 descriptor = str(sp_row["DayDescriptor"]).strip()
-                sub_team = sp_row["SubTeam"]  # e.g. "C&O", "Team A", etc.
+                sub_team = sp_row["SubTeam"]  # e.g. "C&O"
                 if matches_day_descriptor(day, descriptor, working_dates):
                     special_subteam = sub_team
-                    break  # use the first match we find
+                    break
             
             # Gather employees from sub-team days
             if special_subteam:
-                # Only employees from that sub-team
                 eligible_emps = df_employees[df_employees["SubTeam"] == special_subteam]["EmployeeID"].tolist()
             else:
                 # Normal sub-team day logic
-                # We look at each row in SubTeamOfficeDays
-                # If day_abbr or day_full is in row["OfficeDays"], then that sub-team is included
                 subteam_matches = []
                 for _, st_row in df_subteam_days.iterrows():
-                    st_name = st_row["SubTeam"]  # e.g. "C&O"
+                    st_name = st_row["SubTeam"]
                     office_days = [x.strip().lower() for x in str(st_row["OfficeDays"]).split(",")]
                     if day_abbr in office_days or day_full in office_days:
-                        # Add employees from that sub-team
                         st_emps = df_employees[df_employees["SubTeam"] == st_name]["EmployeeID"].tolist()
                         subteam_matches.extend(st_emps)
-                
-                # De-duplicate
                 eligible_emps = list(set(subteam_matches))
             
             # Filter out employees who have no remaining requirement
             eligible_emps = [emp for emp in eligible_emps if employee_remaining.get(emp, 0) > 0]
             
-            # Debug: see what's happening
+            # Debug:
             print(f"--- {day.strftime('%Y-%m-%d')} ---")
             print(f"  available_seats = {available_seats}")
             print(f"  special_subteam = {special_subteam}")
@@ -371,5 +352,5 @@ def generate_roster_schedule(excel_file):
         print(f"Error generating schedule: {e}")
 
 if __name__ == "__main__":
-    excel_filename = "TeamRoster.xlsx"  # Adjust path as needed
+    excel_filename = "TeamRoster.xlsx"  # Adjust as needed
     generate_roster_schedule(excel_filename)
