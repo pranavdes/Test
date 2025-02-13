@@ -6,6 +6,17 @@ from openpyxl import load_workbook
 from openpyxl.styles import PatternFill, Font, Alignment
 from openpyxl.utils import get_column_letter
 
+def normalize_subteam_string(s):
+    """
+    Converts a sub-team string to lowercase, strips leading/trailing spaces.
+    You can also remove or replace special punctuation here if needed.
+    For example, if you want 'C & O' and 'C&O' to be treated the same,
+    you could do: s = s.replace(" ", "").replace("&","")
+    """
+    if not isinstance(s, str):
+        return ""
+    return s.strip().lower()
+
 def get_named_cell_value(wb, cell_name):
     """
     Retrieves the value from a single-cell named range in the workbook.
@@ -38,15 +49,12 @@ def get_table_as_df(ws, table_name):
 def get_working_dates(year, month, public_holidays):
     """
     Returns a list of working dates (datetime objects) for the given month and year,
-    excluding weekends (Sat/Sun) and any dates listed in public_holidays.
+    excluding weekends and public holidays.
     """
     num_days = calendar.monthrange(year, month)[1]
     all_dates = [datetime(year, month, day) for day in range(1, num_days + 1)]
     
-    # Convert holiday dates to date objects for easy comparison
     holiday_dates = set(pd.to_datetime(d).date() for d in public_holidays)
-    
-    # Monday=0, Sunday=6 => so <5 means Mon-Fri
     working = [d for d in all_dates if d.weekday() < 5 and d.date() not in holiday_dates]
     return working
 
@@ -56,16 +64,7 @@ def parse_day_descriptor(descriptor):
       - "1st Working Tuesday"
       - "Last Fri"
       - "2nd Monday"
-    and returns (occurrence, weekday_str), where:
-      - occurrence is an integer (1,2,3,4) or the string "last"
-      - weekday_str is a normalized weekday name in lowercase, e.g. "mon", "tuesday"
-
-    This function is more flexible: it ignores extra words like "Working".
-    It looks for:
-      - One of {"1st", "2nd", "3rd", "4th", "5th", "last"} (case-insensitive)
-      - A weekday substring that starts with or matches any of
-        ["mon", "tue", "wed", "thu", "fri"] or the full name.
-    If it can't parse properly, returns (None, None).
+    Returns (occurrence, weekday_str).
     """
     descriptor = descriptor.strip().lower()
     tokens = descriptor.split()
@@ -78,16 +77,13 @@ def parse_day_descriptor(descriptor):
     wday = None
     
     for token in tokens:
-        # Check if token is an occurrence
         if token in valid_occurrences:
             occ = token
         else:
-            # Check if token matches or starts with short day
             for sd in valid_short_days:
-                if token.startswith(sd):  # e.g. "tue", "tuesday"
+                if token.startswith(sd):
                     wday = sd
                     break
-            # Check if token exactly matches a full day
             for fd in valid_full_days:
                 if token == fd:
                     wday = fd
@@ -106,7 +102,6 @@ def matches_day_descriptor(date_obj, descriptor, working_dates):
     if not occ or not wday:
         return False
     
-    # We'll unify the actual date's day-of-week to short or full
     short_map = {"mon":0, "tue":1, "wed":2, "thu":3, "fri":4}
     full_map  = {"monday":0, "tuesday":1, "wednesday":2, "thursday":3, "friday":4}
     
@@ -117,11 +112,9 @@ def matches_day_descriptor(date_obj, descriptor, working_dates):
     else:
         return False
     
-    # If this date doesn't match the needed weekday, bail
     if date_obj.weekday() != needed_wd:
         return False
     
-    # Collect all working dates in the same month & year with the same weekday
     same_wd_dates = [d for d in working_dates
                      if d.year == date_obj.year
                      and d.month == date_obj.month
@@ -134,11 +127,10 @@ def matches_day_descriptor(date_obj, descriptor, working_dates):
     if occ == "last":
         return date_obj == same_wd_dates[-1]
     else:
-        # "1st", "2nd", etc.
         digit_part = "".join([c for c in occ if c.isdigit()])
         if not digit_part.isdigit():
             return False
-        index = int(digit_part) - 1  # zero-based
+        index = int(digit_part) - 1
         if 0 <= index < len(same_wd_dates):
             return date_obj == same_wd_dates[index]
         else:
@@ -150,6 +142,10 @@ def generate_roster_schedule(excel_file):
       - Named cells: 'OfficePercentage' and 'TargetMonthYear'
       - Excel tables: 'EmployeeData', 'SeatData', 'PublicHolidays',
                       'SubTeamOfficeDays', 'SpecialSubTeamDays', 'SeatPreferences'.
+
+    This version normalizes sub-team strings so that minor differences in case
+    or trailing spaces won't break matching. If you need to unify punctuation
+    (e.g. "C & O" vs. "C&O"), see the 'normalize_subteam_string' function.
     """
     try:
         wb = load_workbook(excel_file)
@@ -162,7 +158,7 @@ def generate_roster_schedule(excel_file):
         if not target_month_year:
             raise ValueError("TargetMonthYear is empty or not defined.")
         
-        # Parse "Mar-25" => month=3, year=2025
+        # Parse e.g. "Mar-25" => (3, 2025)
         month_str, year_str = target_month_year.split("-")
         month = datetime.strptime(month_str, "%b").month
         if len(year_str) == 2:
@@ -178,23 +174,37 @@ def generate_roster_schedule(excel_file):
         df_special_days    = get_table_as_df(static_ws, "SpecialSubTeamDays")
         df_seat_pref       = get_table_as_df(static_ws, "SeatPreferences")
         
-        # 3. Determine working dates
+        # 3. Normalize sub-team names in all relevant DataFrames
+        if "SubTeam" in df_employees.columns:
+            df_employees["SubTeam"] = df_employees["SubTeam"].apply(normalize_subteam_string)
+        if "SubTeam" in df_subteam_days.columns:
+            df_subteam_days["SubTeam"] = df_subteam_days["SubTeam"].apply(normalize_subteam_string)
+        if "SubTeam" in df_special_days.columns:
+            df_special_days["SubTeam"] = df_special_days["SubTeam"].apply(normalize_subteam_string)
+        
+        # 4. Determine working dates
         public_holiday_dates = df_public_holidays["Date"]
         working_dates = get_working_dates(year, month, public_holiday_dates)
         total_working_days = len(working_dates)
         
         required_days = round(total_working_days * (office_percentage / 100.0))
         
-        # 4. Setup employee data
+        # 5. Setup employee data
         employee_remaining = {}
         for _, row in df_employees.iterrows():
             emp_id = row["EmployeeID"]
             employee_remaining[emp_id] = required_days
         
-        employee_names = df_employees.set_index("EmployeeID")["EmployeeName"].to_dict()
-        emp_subteam_map = df_employees.set_index("EmployeeID")["SubTeam"].to_dict()
+        # We'll also store a normalized sub-team for each employee
+        emp_names = {}
+        emp_subteam_norm = {}
+        for _, row in df_employees.iterrows():
+            emp_id = row["EmployeeID"]
+            emp_names[emp_id] = row["EmployeeName"]
+            # row["SubTeam"] is already normalized above
+            emp_subteam_norm[emp_id] = row["SubTeam"]
         
-        # 5. Prepare schedule
+        # 6. Prepare schedule
         schedule = {d: {} for d in working_dates}
         
         # --- A) Assign Fixed Seats ---
@@ -206,6 +216,7 @@ def generate_roster_schedule(excel_file):
             assigned_emp = seat_row.get("AssignedEmployeeID")
             
             if seat_type == "fixed" and pd.notna(assigned_emp):
+                # If assigned_emp is a valid employee, reduce their remaining days
                 for day in working_dates:
                     day_abbr = day.strftime("%a").lower()
                     day_full = day.strftime("%A").lower()
@@ -233,36 +244,46 @@ def generate_roster_schedule(excel_file):
                             available_seats.append(seat_code)
             
             # Determine if there's a special sub-team for this day
-            special_subteam = None
+            special_subteam_norm = None
             for _, sp_row in df_special_days.iterrows():
                 descriptor = str(sp_row["DayDescriptor"]).strip()
-                sub_team = sp_row["SubTeam"]  # e.g. "C&O"
+                st_norm = sp_row["SubTeam"]  # already normalized
                 if matches_day_descriptor(day, descriptor, working_dates):
-                    special_subteam = sub_team
+                    special_subteam_norm = st_norm
                     break
             
             # Gather employees from sub-team days
-            if special_subteam:
-                eligible_emps = df_employees[df_employees["SubTeam"] == special_subteam]["EmployeeID"].tolist()
+            if special_subteam_norm:
+                # Only employees who belong to that sub-team
+                eligible_emps = [
+                    emp for emp in emp_subteam_norm
+                    if emp_subteam_norm[emp] == special_subteam_norm
+                ]
             else:
                 # Normal sub-team day logic
                 subteam_matches = []
                 for _, st_row in df_subteam_days.iterrows():
-                    st_name = st_row["SubTeam"]
+                    st_name_norm = st_row["SubTeam"]  # normalized sub-team
                     office_days = [x.strip().lower() for x in str(st_row["OfficeDays"]).split(",")]
+                    
                     if day_abbr in office_days or day_full in office_days:
-                        st_emps = df_employees[df_employees["SubTeam"] == st_name]["EmployeeID"].tolist()
-                        subteam_matches.extend(st_emps)
+                        # Add employees from that sub-team
+                        subteam_matches.extend([
+                            emp_id for emp_id, stnorm in emp_subteam_norm.items()
+                            if stnorm == st_name_norm
+                        ])
                 eligible_emps = list(set(subteam_matches))
             
             # Filter out employees who have no remaining requirement
             eligible_emps = [emp for emp in eligible_emps if employee_remaining.get(emp, 0) > 0]
             
-            # Debug:
-            print(f"--- {day.strftime('%Y-%m-%d')} ---")
+            # Debug prints
+            print(f"=== {day.strftime('%Y-%m-%d')} ===")
             print(f"  available_seats = {available_seats}")
-            print(f"  special_subteam = {special_subteam}")
-            print(f"  eligible_emps   = {eligible_emps}")
+            print(f"  special_subteam = {special_subteam_norm}")
+            print(f"  => employees in that sub-team: {eligible_emps}")
+            for e in eligible_emps:
+                print(f"     {e} - {emp_names[e]} (remaining={employee_remaining[e]})")
             
             assigned_today = set()
             
@@ -302,18 +323,25 @@ def generate_roster_schedule(excel_file):
         headers = ["Date", "Day"] + seat_codes
         out_ws.append(headers)
         
-        # Sub-team color mapping
-        unique_subteams = df_employees["SubTeam"].unique().tolist()
+        # Sub-team color mapping (using the original, unnormalized SubTeam in df_employees is tricky,
+        # so we'll just color by normalized sub-team for consistency)
+        unique_subteams = list(set(emp_subteam_norm.values()))
         color_palette = ["FFD7CC", "D7F7D7", "CCD7FF", "FFF2CC", "E2EFDA", "FCE4D6"]
-        subteam_color = {st: color_palette[i % len(color_palette)] for i, st in enumerate(unique_subteams)}
+        subteam_color = {}
+        for i, stnorm in enumerate(unique_subteams):
+            # If stnorm is empty, skip or default
+            if not stnorm:
+                subteam_color[stnorm] = "FFFFFF"
+            else:
+                subteam_color[stnorm] = color_palette[i % len(color_palette)]
         
+        # Write schedule rows
         for day in sorted(working_dates):
             row_data = [day.strftime("%Y-%m-%d"), day.strftime("%a")]
             for seat_code in seat_codes:
                 emp_id = schedule[day].get(seat_code, "")
                 if emp_id:
-                    emp_name = employee_names.get(emp_id, "")
-                    row_data.append(f"{emp_id} - {emp_name}")
+                    row_data.append(f"{emp_id} - {emp_names[emp_id]}")
                 else:
                     row_data.append("")
             out_ws.append(row_data)
@@ -325,16 +353,15 @@ def generate_roster_schedule(excel_file):
             cell.fill = header_fill
             cell.alignment = Alignment(horizontal="center", vertical="center")
         
-        # Color-code seat assignments by sub-team
+        # Color-code seat assignments by sub-team (normalized)
         for row in out_ws.iter_rows(min_row=2, min_col=3, max_col=out_ws.max_column):
             for cell in row:
                 if cell.value:
                     emp_id = cell.value.split(" - ")[0].strip()
-                    if emp_id in emp_subteam_map:
-                        st = emp_subteam_map[emp_id]
-                        fill_color = subteam_color.get(st, "FFFFFF")
-                        cell.fill = PatternFill(start_color=fill_color, end_color=fill_color, fill_type="solid")
-                        cell.alignment = Alignment(horizontal="center", vertical="center")
+                    stnorm = emp_subteam_norm.get(emp_id, "")
+                    fill_color = subteam_color.get(stnorm, "FFFFFF")
+                    cell.fill = PatternFill(start_color=fill_color, end_color=fill_color, fill_type="solid")
+                    cell.alignment = Alignment(horizontal="center", vertical="center")
         
         # Adjust column widths
         for col in out_ws.columns:
@@ -352,5 +379,5 @@ def generate_roster_schedule(excel_file):
         print(f"Error generating schedule: {e}")
 
 if __name__ == "__main__":
-    excel_filename = "TeamRoster.xlsx"  # Adjust as needed
+    excel_filename = "TeamRoster.xlsx"  # Adjust path as needed
     generate_roster_schedule(excel_filename)
