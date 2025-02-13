@@ -2,25 +2,12 @@ import calendar
 import random
 from datetime import datetime
 import pandas as pd
+from pulp import LpProblem, LpMaximize, LpVariable, lpSum, LpBinary, LpStatus
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill, Font, Alignment
 from openpyxl.utils import get_column_letter
 
-def normalize_subteam_string(s):
-    """
-    Converts a sub-team string to lowercase, strips leading/trailing spaces.
-    You can also remove or replace special punctuation here if needed.
-    For example, if you want 'C & O' and 'C&O' to be treated the same,
-    you could do: s = s.replace(" ", "").replace("&","")
-    """
-    if not isinstance(s, str):
-        return ""
-    return s.strip().lower()
-
 def get_named_cell_value(wb, cell_name):
-    """
-    Retrieves the value from a single-cell named range in the workbook.
-    """
     try:
         defined_range = wb.defined_names[cell_name]
         for title, coord in defined_range.destinations:
@@ -32,352 +19,383 @@ def get_named_cell_value(wb, cell_name):
         raise ValueError(f"Error reading named cell '{cell_name}': {e}")
 
 def get_table_as_df(ws, table_name):
-    """
-    Reads an Excel Table (ListObject) by its name on a given worksheet
-    and returns the contents as a pandas DataFrame.
-    Assumes the first row of the table is a header row.
-    """
     for tbl in ws._tables:
         if tbl.name == table_name:
-            ref = tbl.ref  # e.g. "A1:C10"
+            ref = tbl.ref
             cells = ws[ref]
             data = [[cell.value for cell in row] for row in cells]
-            df = pd.DataFrame(data[1:], columns=data[0])
-            return df
+            return pd.DataFrame(data[1:], columns=data[0])
     raise ValueError(f"Table '{table_name}' not found on worksheet '{ws.title}'.")
 
 def get_working_dates(year, month, public_holidays):
-    """
-    Returns a list of working dates (datetime objects) for the given month and year,
-    excluding weekends and public holidays.
-    """
     num_days = calendar.monthrange(year, month)[1]
-    all_dates = [datetime(year, month, day) for day in range(1, num_days + 1)]
-    
-    holiday_dates = set(pd.to_datetime(d).date() for d in public_holidays)
-    working = [d for d in all_dates if d.weekday() < 5 and d.date() not in holiday_dates]
+    all_dates = [datetime(year, month, d) for d in range(1, num_days + 1)]
+    holiday_dates = set(pd.to_datetime(h).date() for h in public_holidays)
+    working = [dt for dt in all_dates if dt.weekday() < 5 and dt.date() not in holiday_dates]
     return working
 
-def parse_day_descriptor(descriptor):
+def parse_days_string(days_str):
     """
-    Parses a descriptor like:
-      - "1st Working Tuesday"
-      - "Last Fri"
-      - "2nd Monday"
-    Returns (occurrence, weekday_str).
+    Splits something like 'Mon, Wed, Fri' or 'Monday, Tuesday' into a set of lowercase day abbreviations + full names.
+    We'll store both for easy matching.
     """
-    descriptor = descriptor.strip().lower()
-    tokens = descriptor.split()
-    
-    valid_occurrences = {"1st", "2nd", "3rd", "4th", "5th", "last"}
-    valid_short_days  = ["mon", "tue", "wed", "thu", "fri"]
-    valid_full_days   = ["monday", "tuesday", "wednesday", "thursday", "friday"]
-    
-    occ = None
-    wday = None
-    
-    for token in tokens:
-        if token in valid_occurrences:
-            occ = token
-        else:
-            for sd in valid_short_days:
-                if token.startswith(sd):
-                    wday = sd
-                    break
-            for fd in valid_full_days:
-                if token == fd:
-                    wday = fd
-                    break
-    
-    if not occ or not wday:
-        return (None, None)
-    return (occ, wday)
+    if not isinstance(days_str, str):
+        return set()
+    parts = [p.strip() for p in days_str.split(',')]
+    day_set = set()
+    for p in parts:
+        p_l = p.lower()
+        # If user typed "Mon" or "Monday", we store both forms
+        # so we can match either day_abbr or day_full
+        if p_l.startswith("mon"):
+            day_set.update(["mon", "monday"])
+        elif p_l.startswith("tue"):
+            day_set.update(["tue", "tuesday"])
+        elif p_l.startswith("wed"):
+            day_set.update(["wed", "wednesday"])
+        elif p_l.startswith("thu"):
+            day_set.update(["thu", "thursday"])
+        elif p_l.startswith("fri"):
+            day_set.update(["fri", "friday"])
+    return day_set
 
-def matches_day_descriptor(date_obj, descriptor, working_dates):
+def matches_special_subteam(day, df_special, working_dates, subteam_of_employee):
     """
-    Returns True if 'date_obj' matches the descriptor (like "1st Working Tuesday")
-    among the given working_dates.
+    Returns True if 'day' is declared special for a sub-team that does NOT match subteam_of_employee.
+    If so, we can't assign that employee. Otherwise, returns False.
     """
-    occ, wday = parse_day_descriptor(descriptor)
-    if not occ or not wday:
+    # If day is special for sub-team X, employees not in X are excluded
+    for _, row in df_special.iterrows():
+        descriptor = str(row["DayDescriptor"]).strip()
+        st = row["SubTeam"]
+        if is_day_descriptor_match(day, descriptor, working_dates):
+            # If the employee's sub-team != st, exclude them
+            if subteam_of_employee != st:
+                return True
+    return False
+
+def is_day_descriptor_match(date_obj, descriptor, working_dates):
+    """
+    Similar to 'matches_day_descriptor' from earlier examples.
+    '1st Tue', 'Last Friday', etc.
+    """
+    desc = descriptor.strip().lower().split()
+    if len(desc) < 2:
+        return False
+    # We won't re-implement the entire parse logic here for brevity
+    # We'll do a simpler approach or re-use from earlier if needed
+    # For clarity, let's do a small approach:
+    from_dayname = date_obj.strftime("%a").lower()  # e.g. 'mon'
+    from_dayfull = date_obj.strftime("%A").lower()  # e.g. 'monday'
+    
+    # find occurrence token
+    occ = desc[0]  # '1st', 'last', etc.
+    day_str = desc[-1]  # 'tue', 'tuesday', 'friday', etc.
+    
+    # Check day match
+    if not (from_dayname.startswith(day_str) or from_dayfull == day_str):
         return False
     
-    short_map = {"mon":0, "tue":1, "wed":2, "thu":3, "fri":4}
-    full_map  = {"monday":0, "tuesday":1, "wednesday":2, "thursday":3, "friday":4}
+    # Collect all working dates that share the same weekday
+    needed_wd = date_obj.weekday()
+    same_wd = [d for d in working_dates if d.month == date_obj.month and d.weekday() == needed_wd]
+    same_wd.sort()
     
-    if wday in short_map:
-        needed_wd = short_map[wday]
-    elif wday in full_map:
-        needed_wd = full_map[wday]
+    if occ == 'last':
+        return date_obj == same_wd[-1]
     else:
-        return False
-    
-    if date_obj.weekday() != needed_wd:
-        return False
-    
-    same_wd_dates = [d for d in working_dates
-                     if d.year == date_obj.year
-                     and d.month == date_obj.month
-                     and d.weekday() == needed_wd]
-    same_wd_dates.sort()
-    
-    if not same_wd_dates:
-        return False
-    
-    if occ == "last":
-        return date_obj == same_wd_dates[-1]
-    else:
-        digit_part = "".join([c for c in occ if c.isdigit()])
+        # parse e.g. '1st', '2nd'
+        digit_part = "".join(c for c in occ if c.isdigit())
         if not digit_part.isdigit():
             return False
-        index = int(digit_part) - 1
-        if 0 <= index < len(same_wd_dates):
-            return date_obj == same_wd_dates[index]
+        idx = int(digit_part) - 1
+        if 0 <= idx < len(same_wd):
+            return date_obj == same_wd[idx]
         else:
             return False
 
-def generate_roster_schedule(excel_file):
+def generate_roster_schedule_ilp(excel_file):
     """
-    Generates a team rostering schedule for a given month-year based on:
-      - Named cells: 'OfficePercentage' and 'TargetMonthYear'
-      - Excel tables: 'EmployeeData', 'SeatData', 'PublicHolidays',
-                      'SubTeamOfficeDays', 'SpecialSubTeamDays', 'SeatPreferences'.
-
-    This version normalizes sub-team strings so that minor differences in case
-    or trailing spaces won't break matching. If you need to unify punctuation
-    (e.g. "C & O" vs. "C&O"), see the 'normalize_subteam_string' function.
-    """
-    try:
-        wb = load_workbook(excel_file)
-        static_ws = wb["Static Data"]
-        
-        # 1. Named Cells
-        office_percentage = get_named_cell_value(wb, "OfficePercentage")
-        target_month_year = get_named_cell_value(wb, "TargetMonthYear")
-        
-        if not target_month_year:
-            raise ValueError("TargetMonthYear is empty or not defined.")
-        
-        # Parse e.g. "Mar-25" => (3, 2025)
-        month_str, year_str = target_month_year.split("-")
-        month = datetime.strptime(month_str, "%b").month
-        if len(year_str) == 2:
-            year = int("20" + year_str)
-        else:
-            year = int(year_str)
-        
-        # 2. Read Tables
-        df_employees       = get_table_as_df(static_ws, "EmployeeData")
-        df_seats           = get_table_as_df(static_ws, "SeatData")
-        df_public_holidays = get_table_as_df(static_ws, "PublicHolidays")
-        df_subteam_days    = get_table_as_df(static_ws, "SubTeamOfficeDays")
-        df_special_days    = get_table_as_df(static_ws, "SpecialSubTeamDays")
-        df_seat_pref       = get_table_as_df(static_ws, "SeatPreferences")
-        
-        # 3. Normalize sub-team names in all relevant DataFrames
-        if "SubTeam" in df_employees.columns:
-            df_employees["SubTeam"] = df_employees["SubTeam"].apply(normalize_subteam_string)
-        if "SubTeam" in df_subteam_days.columns:
-            df_subteam_days["SubTeam"] = df_subteam_days["SubTeam"].apply(normalize_subteam_string)
-        if "SubTeam" in df_special_days.columns:
-            df_special_days["SubTeam"] = df_special_days["SubTeam"].apply(normalize_subteam_string)
-        
-        # 4. Determine working dates
-        public_holiday_dates = df_public_holidays["Date"]
-        working_dates = get_working_dates(year, month, public_holiday_dates)
-        total_working_days = len(working_dates)
-        
-        required_days = round(total_working_days * (office_percentage / 100.0))
-        
-        # 5. Setup employee data
-        employee_remaining = {}
-        for _, row in df_employees.iterrows():
-            emp_id = row["EmployeeID"]
-            employee_remaining[emp_id] = required_days
-        
-        # We'll also store a normalized sub-team for each employee
-        emp_names = {}
-        emp_subteam_norm = {}
-        for _, row in df_employees.iterrows():
-            emp_id = row["EmployeeID"]
-            emp_names[emp_id] = row["EmployeeName"]
-            # row["SubTeam"] is already normalized above
-            emp_subteam_norm[emp_id] = row["SubTeam"]
-        
-        # 6. Prepare schedule
-        schedule = {d: {} for d in working_dates}
-        
-        # --- A) Assign Fixed Seats ---
-        for _, seat_row in df_seats.iterrows():
-            seat_code = seat_row["SeatCode"]
-            seat_type = str(seat_row["SeatType"]).strip().lower()
-            seat_days = [x.strip().lower() for x in str(seat_row["Days"]).split(",")]
-            
-            assigned_emp = seat_row.get("AssignedEmployeeID")
-            
-            if seat_type == "fixed" and pd.notna(assigned_emp):
-                # If assigned_emp is a valid employee, reduce their remaining days
-                for day in working_dates:
-                    day_abbr = day.strftime("%a").lower()
-                    day_full = day.strftime("%A").lower()
-                    
-                    if day_abbr in seat_days or day_full in seat_days:
-                        schedule[day][seat_code] = assigned_emp
-                        if employee_remaining.get(assigned_emp, 0) > 0:
-                            employee_remaining[assigned_emp] -= 1
-        
-        # --- B) Assign Flexible Seats ---
-        for day in sorted(working_dates):
-            day_abbr = day.strftime("%a").lower()
-            day_full = day.strftime("%A").lower()
-            
-            # Collect flexible seats not yet assigned
-            available_seats = []
-            for _, seat_row in df_seats.iterrows():
-                seat_code = seat_row["SeatCode"]
-                seat_type = str(seat_row["SeatType"]).strip().lower()
-                seat_days = [x.strip().lower() for x in str(seat_row["Days"]).split(",")]
-                
-                if seat_type == "flexible":
-                    if (day_abbr in seat_days or day_full in seat_days):
-                        if seat_code not in schedule[day]:
-                            available_seats.append(seat_code)
-            
-            # Determine if there's a special sub-team for this day
-            special_subteam_norm = None
-            for _, sp_row in df_special_days.iterrows():
-                descriptor = str(sp_row["DayDescriptor"]).strip()
-                st_norm = sp_row["SubTeam"]  # already normalized
-                if matches_day_descriptor(day, descriptor, working_dates):
-                    special_subteam_norm = st_norm
-                    break
-            
-            # Gather employees from sub-team days
-            if special_subteam_norm:
-                # Only employees who belong to that sub-team
-                eligible_emps = [
-                    emp for emp in emp_subteam_norm
-                    if emp_subteam_norm[emp] == special_subteam_norm
-                ]
-            else:
-                # Normal sub-team day logic
-                subteam_matches = []
-                for _, st_row in df_subteam_days.iterrows():
-                    st_name_norm = st_row["SubTeam"]  # normalized sub-team
-                    office_days = [x.strip().lower() for x in str(st_row["OfficeDays"]).split(",")]
-                    
-                    if day_abbr in office_days or day_full in office_days:
-                        # Add employees from that sub-team
-                        subteam_matches.extend([
-                            emp_id for emp_id, stnorm in emp_subteam_norm.items()
-                            if stnorm == st_name_norm
-                        ])
-                eligible_emps = list(set(subteam_matches))
-            
-            # Filter out employees who have no remaining requirement
-            eligible_emps = [emp for emp in eligible_emps if employee_remaining.get(emp, 0) > 0]
-            
-            # Debug prints
-            print(f"=== {day.strftime('%Y-%m-%d')} ===")
-            print(f"  available_seats = {available_seats}")
-            print(f"  special_subteam = {special_subteam_norm}")
-            print(f"  => employees in that sub-team: {eligible_emps}")
-            for e in eligible_emps:
-                print(f"     {e} - {emp_names[e]} (remaining={employee_remaining[e]})")
-            
-            assigned_today = set()
-            
-            for seat_code in available_seats:
-                # Check seat preferences
-                seat_pref_rows = df_seat_pref[df_seat_pref["SeatCode"] == seat_code]
-                if not seat_pref_rows.empty:
-                    pref_emp_ids = seat_pref_rows["EmployeeID"].tolist()
-                    pref_candidates = [emp for emp in pref_emp_ids if emp in eligible_emps and emp not in assigned_today]
-                    if pref_candidates:
-                        chosen = random.choice(pref_candidates)
-                        schedule[day][seat_code] = chosen
-                        employee_remaining[chosen] -= 1
-                        assigned_today.add(chosen)
-                        continue
-                
-                # Otherwise assign randomly if we still have eligible candidates
-                remaining_candidates = [emp for emp in eligible_emps if emp not in assigned_today]
-                if remaining_candidates:
-                    chosen = random.choice(remaining_candidates)
-                    schedule[day][seat_code] = chosen
-                    employee_remaining[chosen] -= 1
-                    assigned_today.add(chosen)
-        
-        # --- C) Create/Overwrite Output Sheet ---
-        if target_month_year in wb.sheetnames:
-            out_ws = wb[target_month_year]
-            # Optional: clear existing data
-            for row in out_ws.iter_rows(min_row=1, max_row=out_ws.max_row,
-                                        min_col=1, max_col=out_ws.max_column):
-                for cell in row:
-                    cell.value = None
-        else:
-            out_ws = wb.create_sheet(title=target_month_year)
-        
-        seat_codes = df_seats["SeatCode"].tolist()
-        headers = ["Date", "Day"] + seat_codes
-        out_ws.append(headers)
-        
-        # Sub-team color mapping (using the original, unnormalized SubTeam in df_employees is tricky,
-        # so we'll just color by normalized sub-team for consistency)
-        unique_subteams = list(set(emp_subteam_norm.values()))
-        color_palette = ["FFD7CC", "D7F7D7", "CCD7FF", "FFF2CC", "E2EFDA", "FCE4D6"]
-        subteam_color = {}
-        for i, stnorm in enumerate(unique_subteams):
-            # If stnorm is empty, skip or default
-            if not stnorm:
-                subteam_color[stnorm] = "FFFFFF"
-            else:
-                subteam_color[stnorm] = color_palette[i % len(color_palette)]
-        
-        # Write schedule rows
-        for day in sorted(working_dates):
-            row_data = [day.strftime("%Y-%m-%d"), day.strftime("%a")]
-            for seat_code in seat_codes:
-                emp_id = schedule[day].get(seat_code, "")
-                if emp_id:
-                    row_data.append(f"{emp_id} - {emp_names[emp_id]}")
-                else:
-                    row_data.append("")
-            out_ws.append(row_data)
-        
-        # Format the header
-        header_fill = PatternFill(start_color="FFC000", end_color="FFC000", fill_type="solid")
-        for cell in out_ws[1]:
-            cell.font = Font(bold=True)
-            cell.fill = header_fill
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-        
-        # Color-code seat assignments by sub-team (normalized)
-        for row in out_ws.iter_rows(min_row=2, min_col=3, max_col=out_ws.max_column):
-            for cell in row:
-                if cell.value:
-                    emp_id = cell.value.split(" - ")[0].strip()
-                    stnorm = emp_subteam_norm.get(emp_id, "")
-                    fill_color = subteam_color.get(stnorm, "FFFFFF")
-                    cell.fill = PatternFill(start_color=fill_color, end_color=fill_color, fill_type="solid")
-                    cell.alignment = Alignment(horizontal="center", vertical="center")
-        
-        # Adjust column widths
-        for col in out_ws.columns:
-            max_length = 0
-            column_letter = get_column_letter(col[0].column)
-            for cell in col:
-                if cell.value:
-                    max_length = max(max_length, len(str(cell.value)))
-            out_ws.column_dimensions[column_letter].width = max_length + 2
-        
-        wb.save(excel_file)
-        print("Roster schedule generated successfully.")
+    Builds and solves an ILP to ensure every employee meets their required days
+    if feasible, with seat preferences, sub-team designated days (priority),
+    special sub-team days (exclusive), and fixed seats.
     
-    except Exception as e:
-        print(f"Error generating schedule: {e}")
+    Output is written in a column-oriented format: each date is a column,
+    the second row is the weekday, then each row after that is a seat code
+    with the occupant's name (or blank).
+    """
+    wb = load_workbook(excel_file)
+    static_ws = wb["Static Data"]
+    
+    # Named cells
+    office_percentage = get_named_cell_value(wb, "OfficePercentage")  # e.g. 0.6
+    target_month_year = get_named_cell_value(wb, "TargetMonthYear")   # e.g. "Mar-25"
+    
+    month_str, year_str = target_month_year.split("-")
+    month = datetime.strptime(month_str, "%b").month
+    if len(year_str) == 2:
+        year = int("20" + year_str)
+    else:
+        year = int(year_str)
+    
+    # Tables
+    df_employees       = get_table_as_df(static_ws, "EmployeeData")
+    df_seats           = get_table_as_df(static_ws, "SeatData")
+    df_public_holidays = get_table_as_df(static_ws, "PublicHolidays")
+    df_subteam_days    = get_table_as_df(static_ws, "SubTeamOfficeDays")
+    df_special_days    = get_table_as_df(static_ws, "SpecialSubTeamDays")
+    df_seat_pref       = get_table_as_df(static_ws, "SeatPreferences")
+    
+    # Build sets
+    employees = df_employees["EmployeeID"].tolist()
+    seats = df_seats["SeatCode"].tolist()
+    
+    # Working dates
+    working_dates = get_working_dates(year, month, df_public_holidays["Date"])
+    working_dates.sort()  # for consistent ordering
+    
+    # Each employee's required days
+    total_wd = len(working_dates)
+    required_days_val = round(total_wd * office_percentage)
+    required_days = {emp: required_days_val for emp in employees}
+    
+    # Map sub-teams, employee names
+    emp_subteam = dict(zip(df_employees["EmployeeID"], df_employees["SubTeam"]))
+    emp_names   = dict(zip(df_employees["EmployeeID"], df_employees["EmployeeName"]))
+    
+    # For seat preferences, we'll define a small bonus
+    seat_pref_bonus = {}
+    for _, row in df_seat_pref.iterrows():
+        e = row["EmployeeID"]
+        s = row["SeatCode"]
+        seat_pref_bonus[(e, s)] = 10  # an arbitrary positive bonus for pref
+    
+    # For sub-team designated days, a smaller bonus
+    # We'll store which sub-teams are designated for each weekday
+    # e.g. "Team A" => "Mon, Wed"
+    subteam_days_map = {}
+    # subteam_days_map[subteam_name] = set of day abbreviations
+    for _, row in df_subteam_days.iterrows():
+        st = row["SubTeam"]
+        ds = parse_days_string(row["OfficeDays"])
+        subteam_days_map.setdefault(st, set()).update(ds)
+    
+    # We'll define a sub-team day bonus of 5 if an employee is on a day that matches their sub-team
+    subteam_bonus = 5
+    fill_bonus = 1  # reward simply occupying a seat
+    
+    # For seat day constraints
+    seat_day_avail = {}  # seat_day_avail[s, d] = True if seat s is allowed on day d
+    for _, srow in df_seats.iterrows():
+        s_code = srow["SeatCode"]
+        seat_days_set = parse_days_string(srow["Days"])
+        # For each working day, check if day is in seat_days_set
+        for d in working_dates:
+            d_abbr = d.strftime("%a").lower()  # mon
+            d_full = d.strftime("%A").lower()  # monday
+            # If seat_days_set is empty or doesn't contain d_abbr/d_full, seat not available
+            if d_abbr in seat_days_set or d_full in seat_days_set:
+                seat_day_avail[(s_code, d)] = True
+            else:
+                seat_day_avail[(s_code, d)] = False
+    
+    # For fixed seats
+    # If seat is fixed to emp on certain days, we must force x[e,s,d] = 1 and others=0
+    # We'll store a dictionary: fixed_assign[s, d] = e or None
+    fixed_assign = {}
+    for _, row in df_seats.iterrows():
+        if str(row["SeatType"]).strip().lower() == "fixed":
+            assigned_emp = row.get("AssignedEmployeeID")
+            if pd.notna(assigned_emp):
+                s_code = row["SeatCode"]
+                seat_days_set = parse_days_string(row["Days"])
+                for d in working_dates:
+                    d_abbr = d.strftime("%a").lower()
+                    d_full = d.strftime("%A").lower()
+                    if d_abbr in seat_days_set or d_full in seat_days_set:
+                        fixed_assign[(s_code, d)] = assigned_emp
+    
+    # Build the ILP
+    model = LpProblem("GlobalRostering", LpMaximize)
+    
+    # Decision vars: x[e,s,d] in {0,1}
+    x = {}
+    for e in employees:
+        for s in seats:
+            for d in working_dates:
+                var_name = f"x_{e}_{s}_{d.strftime('%d')}"
+                x[(e,s,d)] = LpVariable(var_name, cat=LpBinary)
+    
+    # 1) Each seat can have at most 1 occupant per day
+    for s in seats:
+        for d in working_dates:
+            model += lpSum(x[(e,s,d)] for e in employees) <= 1, f"SeatOccupancy_{s}_{d}"
+    
+    # 2) Each employee can only occupy at most 1 seat per day
+    for e in employees:
+        for d in working_dates:
+            model += lpSum(x[(e,s,d2)] for s in seats for d2 in [d]) <= 1, f"EmployeeOneSeat_{e}_{d}"
+    
+    # 3) Each employee must meet required days
+    for e in employees:
+        model += lpSum(x[(e,s,d)] for s in seats for d in working_dates) >= required_days[e], f"RequiredDays_{e}"
+    
+    # 4) If seat is fixed for day => x[fixedEmp, seat, day] = 1, others=0
+    # We'll do it by forcing constraints
+    for (s_code, d), e_fix in fixed_assign.items():
+        # x[e_fix,s_code,d] = 1
+        model += x[(e_fix, s_code, d)] == 1, f"FixedSeat_{s_code}_{d}"
+        # For all other employees e != e_fix => x[e, s_code, d] = 0
+        for e2 in employees:
+            if e2 != e_fix:
+                model += x[(e2, s_code, d)] == 0, f"FixedSeatZero_{s_code}_{d}_{e2}"
+    
+    # 5) If day is special for sub-team T => employees not in T can't come
+    # We'll do that day-by-day after we solve the "which days are special for which sub-team"
+    # Actually we can incorporate it in constraints: for each day, check if it's special sub-team
+    # But we can have multiple special day definitions. If we find a match, that day is exclusive
+    # We'll do the same approach: if day matches descriptor for sub-team T, then for employees e
+    # who are not in T => x[e,s,d]=0
+    for d in working_dates:
+        # figure out if there's a special sub-team for d
+        sub_teams_for_this_day = []
+        for _, row2 in df_special_days.iterrows():
+            if is_day_descriptor_match(d, row2["DayDescriptor"], working_dates):
+                sub_teams_for_this_day.append(row2["SubTeam"])
+        # If multiple lines match, we combine them? Or assume only one sub-team per day?
+        # We'll assume only one special sub-team can match a day (or the last one in the table).
+        if sub_teams_for_this_day:
+            special_t = sub_teams_for_this_day[-1]  # pick the first or last
+            # Exclude employees not in special_t
+            for e in employees:
+                if emp_subteam[e] != special_t:
+                    for s in seats:
+                        model += x[(e,s,d)] == 0, f"SpecialExcl_{e}_{s}_{d}"
+    
+    # 6) If seat_day_avail[s,d] = False => x[e,s,d] = 0 for all e
+    for s in seats:
+        for d in working_dates:
+            if not seat_day_avail[(s,d)]:
+                for e in employees:
+                    model += x[(e,s,d)] == 0, f"SeatNotAvail_{s}_{d}_{e}"
+    
+    # Build the objective: seat preferences, sub-team designated day bonus, plus fill
+    # seat_pref_bonus[(e,s)] = e.g. 10 if e prefers s, else 0
+    # sub-team day => if day_abbr is designated for sub-team of e => +5
+    # fill => +1 for every seat assignment
+    # We do a sum of (pref + subteam bonus + fill) * x[e,s,d]
+    objective_terms = []
+    
+    # Pre-calculate sub-team day sets for quick lookup
+    # subteam_days_map[st] => set of day tokens
+    for e in employees:
+        e_st = emp_subteam[e]
+        for s in seats:
+            pref_b = seat_pref_bonus.get((e,s), 0)
+            for d in working_dates:
+                fill_b = 1  # reward any assignment
+                # sub-team day bonus?
+                day_abbr = d.strftime("%a").lower()
+                day_full = d.strftime("%A").lower()
+                st_day_bonus = 0
+                if e_st in subteam_days_map:
+                    st_set = subteam_days_map[e_st]
+                    if (day_abbr in st_set) or (day_full in st_set):
+                        st_day_bonus = 5
+                total_bonus = pref_b + st_day_bonus + fill_b
+                objective_terms.append(total_bonus * x[(e,s,d)])
+    
+    model += lpSum(objective_terms), "MaximizePreferencesAndUsage"
+    
+    # Solve
+    model.solve()
+    
+    if LpStatus[model.status] != "Optimal":
+        print("No feasible solution found or solver did not find an optimal solution.")
+        return
+    
+    # Extract solution
+    # For each day, seat => assigned employee (or None)
+    day_seat_assignment = { (d,s): None for d in working_dates for s in seats }
+    
+    for e in employees:
+        for s in seats:
+            for d in working_dates:
+                if x[(e,s,d)].varValue == 1:
+                    day_seat_assignment[(d,s)] = e
+    
+    # --- OUTPUT SHEET in column-oriented format ---
+    out_sheet_name = target_month_year
+    if out_sheet_name in wb.sheetnames:
+        out_ws = wb[out_sheet_name]
+        # Clear
+        for row in out_ws.iter_rows(min_row=1, max_row=out_ws.max_row,
+                                    min_col=1, max_col=out_ws.max_column):
+            for cell in row:
+                cell.value = None
+    else:
+        out_ws = wb.create_sheet(title=out_sheet_name)
+    
+    # We want:
+    # Row1: each day col => "YYYY-MM-DD"
+    # Row2: each day col => "Mon"
+    # Then for each seat => occupant's name
+    # So the first column can be "SeatCode" as the header
+    # We'll do 1-based indexing in openpyxl. So col=2.. for each date
+    # row=3.. for each seat
+    out_ws.cell(row=1, column=1).value = "Seat / Date"
+    out_ws.cell(row=2, column=1).value = "Day"
+    
+    # Write date headers
+    for idx, d in enumerate(working_dates):
+        col = idx + 2
+        out_ws.cell(row=1, column=col).value = d.strftime("%Y-%m-%d")
+        out_ws.cell(row=2, column=col).value = d.strftime("%a")
+    
+    # Now each seat is a row
+    # row=3..  so seat i => row= i+2
+    for i, s_code in enumerate(seats):
+        row_i = i + 3
+        out_ws.cell(row=row_i, column=1).value = s_code
+        # fill occupant
+        for idx, d in enumerate(working_dates):
+            col = idx + 2
+            occupant_emp = day_seat_assignment[(d,s_code)]
+            if occupant_emp:
+                occupant_name = emp_names[occupant_emp]
+                out_ws.cell(row=row_i, column=col).value = occupant_name
+            else:
+                out_ws.cell(row=row_i, column=col).value = ""
+    
+    # Some formatting
+    header_fill = PatternFill(start_color="FFC000", end_color="FFC000", fill_type="solid")
+    # First row
+    for cell in out_ws[1]:
+        cell.font = Font(bold=True)
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+    # Second row
+    for cell in out_ws[2]:
+        cell.font = Font(bold=True)
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+    # First column
+    for row in out_ws.iter_rows(min_row=1, max_row=2+len(seats), min_col=1, max_col=1):
+        for cell in row:
+            cell.font = Font(bold=True)
+    
+    # Optionally auto-width
+    for col_obj in out_ws.columns:
+        max_len = 0
+        col_letter = get_column_letter(col_obj[0].column)
+        for c in col_obj:
+            if c.value and isinstance(c.value, str):
+                max_len = max(max_len, len(c.value))
+        out_ws.column_dimensions[col_letter].width = max_len + 2
+    
+    wb.save(excel_file)
+    print("Global ILP schedule generated successfully.")
 
 if __name__ == "__main__":
-    excel_filename = "TeamRoster.xlsx"  # Adjust path as needed
-    generate_roster_schedule(excel_filename)
+    excel_filename = "TeamRoster.xlsx"
+    generate_roster_schedule_ilp(excel_filename)
