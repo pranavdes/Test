@@ -3,6 +3,9 @@ import random
 import threading
 import ctypes
 import sys
+import os
+import logging
+from datetime import datetime
 from ctypes import wintypes
 import pythoncom
 import pyWinhook as pyHook
@@ -12,6 +15,38 @@ MIN_IDLE_TIME = 180  # seconds (3 minutes) before considering the system idle
 CHECK_INTERVAL = 10  # seconds between idle checks
 ACTIVITY_INTERVAL_MIN = 30  # minimum seconds between simulated activities
 ACTIVITY_INTERVAL_MAX = 120  # maximum seconds between simulated activities
+LOG_FILE = "keep_active_log.txt"  # log file name
+
+# Set up logging
+def setup_logging():
+    log_dir = os.path.dirname(os.path.abspath(__file__))
+    log_path = os.path.join(log_dir, LOG_FILE)
+    
+    # Create a logger
+    logger = logging.getLogger('KeepActiveLogger')
+    logger.setLevel(logging.INFO)
+    
+    # Create file handler
+    file_handler = logging.FileHandler(log_path)
+    file_handler.setLevel(logging.INFO)
+    
+    # Create console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    
+    # Create formatter and add it to the handlers
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    file_handler.setFormatter(formatter)
+    console_handler.setFormatter(formatter)
+    
+    # Add the handlers to the logger
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
+    return logger
+
+# Initialize logger
+logger = setup_logging()
 
 # Windows API functions
 class LASTINPUTINFO(ctypes.Structure):
@@ -57,6 +92,9 @@ def simulate_subtle_mouse_movement():
     
     # Move mouse back to original position
     user32.SetCursorPos(point.x, point.y)
+    
+    # Log the activity
+    logger.info(f"Mouse moved by ({x_offset}, {y_offset}) pixels and returned to position ({point.x}, {point.y})")
 
 # Function to simulate pressing a harmless key (e.g., NumLock or Scroll Lock)
 def simulate_harmless_key_press():
@@ -67,16 +105,26 @@ def simulate_harmless_key_press():
     user32.keybd_event(VK_SCROLL, 0, 0, 0)
     time.sleep(0.05)
     user32.keybd_event(VK_SCROLL, 0, KEYEVENTF_KEYUP, 0)
+    
+    # Log the activity
+    logger.info("Simulated Scroll Lock key press")
 
 # Function to simulate human activity
 def simulate_activity():
     # Randomly choose between mouse movement and key press
-    if random.random() < 0.7:  # 70% chance for mouse movement
+    activity_type = "mouse movement" if random.random() < 0.7 else "key press" 
+    
+    # Log before simulation
+    logger.info(f"Simulating {activity_type}")
+    
+    # Perform the activity
+    if activity_type == "mouse movement":
         simulate_subtle_mouse_movement()
     else:
         simulate_harmless_key_press()
     
-    print(f"Activity simulated at {time.strftime('%H:%M:%S')}")
+    # Log completion
+    logger.info(f"Activity simulation completed at {time.strftime('%H:%M:%S')}")
 
 # Variables for tracking user activity
 user_active = True
@@ -87,6 +135,7 @@ def on_mouse_event(event):
     global user_active, last_user_activity
     user_active = True
     last_user_activity = time.time()
+    logger.debug(f"User mouse activity detected: {event.MessageName}")
     return True
 
 # Callback function for keyboard events
@@ -94,6 +143,7 @@ def on_keyboard_event(event):
     global user_active, last_user_activity
     user_active = True
     last_user_activity = time.time()
+    logger.debug(f"User keyboard activity detected: Key {event.Key}")
     return True
 
 # Function to monitor user activity
@@ -116,8 +166,10 @@ def monitor_user_activity():
 def keep_active():
     global user_active, last_user_activity
     
-    print("Keep-active service started.")
-    print(f"Will activate after {MIN_IDLE_TIME} seconds of inactivity.")
+    logger.info("=== Keep-active service started ===")
+    logger.info(f"Will activate after {MIN_IDLE_TIME} seconds of inactivity")
+    logger.info(f"Logging to console and {os.path.abspath(LOG_FILE)}")
+    logger.info(f"Activity interval: {ACTIVITY_INTERVAL_MIN}-{ACTIVITY_INTERVAL_MAX} seconds")
     
     while True:
         try:
@@ -132,18 +184,22 @@ def keep_active():
             # If the user has been idle for longer than threshold, simulate activity
             if idle_time >= MIN_IDLE_TIME:
                 user_active = False
+                logger.info(f"System idle for {idle_time:.1f} seconds - activating simulation")
                 simulate_activity()
                 
                 # Wait a random interval before next activity
                 wait_time = random.randint(ACTIVITY_INTERVAL_MIN, ACTIVITY_INTERVAL_MAX)
+                logger.info(f"Waiting {wait_time} seconds before next activity simulation")
                 time.sleep(wait_time)
             else:
+                if idle_time > MIN_IDLE_TIME * 0.5:  # Log when approaching idle threshold
+                    logger.debug(f"Current idle time: {idle_time:.1f} seconds")
                 user_active = True
                 last_user_activity = time.time()
                 time.sleep(CHECK_INTERVAL)
                 
         except Exception as e:
-            print(f"Error: {e}")
+            logger.error(f"Error in keep_active function: {e}")
             time.sleep(CHECK_INTERVAL)
 
 # Run as a Windows service or in background
