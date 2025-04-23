@@ -1,3 +1,6 @@
+# Installation instructions for required packages:
+# pip install pywin32 pyautogui pynput pyWinhook pythoncom
+
 import time
 import random
 import threading
@@ -6,7 +9,7 @@ import sys
 import os
 import math
 import logging
-import keyboard
+from pynput.keyboard import Controller as KeyboardController
 import win32com.client
 import win32gui
 import win32con
@@ -15,6 +18,9 @@ from datetime import datetime
 from ctypes import wintypes
 import pythoncom
 import pyWinhook as pyHook
+
+# Initialize keyboard controller
+keyboard = KeyboardController()
 
 # Constants
 MIN_IDLE_TIME = 180  # seconds (3 minutes) before considering the system idle
@@ -121,7 +127,8 @@ def simulate_human_typing(text):
             time.sleep(base_spc)
             
         # Type the character
-        keyboard.write(char)
+        keyboard.press(char)
+        keyboard.release(char)
         
     # Add a pause at the end
     time.sleep(random.uniform(0.5, 1.0))
