@@ -4,7 +4,13 @@ import threading
 import ctypes
 import sys
 import os
+import math
 import logging
+import keyboard
+import win32com.client
+import win32gui
+import win32con
+import pyautogui
 from datetime import datetime
 from ctypes import wintypes
 import pythoncom
@@ -16,6 +22,30 @@ CHECK_INTERVAL = 10  # seconds between idle checks
 ACTIVITY_INTERVAL_MIN = 30  # minimum seconds between simulated activities
 ACTIVITY_INTERVAL_MAX = 120  # maximum seconds between simulated activities
 LOG_FILE = "keep_active_log.txt"  # log file name
+
+# Finance-related keywords for realistic typing
+FINANCE_KEYWORDS = [
+    "Risk Assessment Report",
+    "Control Testing Procedures",
+    "Account Verification Process",
+    "Quality Assurance Review",
+    "Management Information Report",
+    "EUC Testing Guidelines",
+    "Internal Control Framework",
+    "Compliance Monitoring",
+    "Risk Mitigation Strategy",
+    "Control Self Assessment",
+    "Audit Findings Review",
+    "Regulatory Compliance Check",
+    "Transaction Verification",
+    "Reconciliation Process",
+    "Risk Register Update",
+    "Control Effectiveness Testing",
+    "Documentation Review Process",
+    "Incident Management Workflow",
+    "Financial Control Metrics",
+    "Operational Risk Assessment"
+]
 
 # Set up logging
 def setup_logging():
@@ -72,56 +102,235 @@ def get_idle_time():
     millis = kernel32.GetTickCount() - last_input_info.dwTime
     return millis / 1000.0  # convert to seconds
 
-# Function to simulate a subtle mouse movement
-def simulate_subtle_mouse_movement():
+# Function to simulate human-like typing with natural variations in speed
+def simulate_human_typing(text):
+    # Base typing speed (words per minute)
+    base_wpm = random.uniform(45, 70)
+    # Convert to seconds per character
+    base_spc = 60 / (base_wpm * 5)
+    
+    logger.info(f"Simulating typing text: '{text}'")
+    
+    for char in text:
+        # Add natural variation to typing speed
+        if random.random() < 0.1:  # Occasional longer pause (like thinking)
+            time.sleep(random.uniform(0.5, 1.2))
+        elif random.random() < 0.3:  # Frequent slight variations
+            time.sleep(base_spc * random.uniform(0.8, 1.5))
+        else:
+            time.sleep(base_spc)
+            
+        # Type the character
+        keyboard.write(char)
+        
+    # Add a pause at the end
+    time.sleep(random.uniform(0.5, 1.0))
+
+# Function to open a new Outlook email
+def open_new_outlook_email():
+    try:
+        logger.info("Opening new Outlook email")
+        
+        # Use win32com to interact with Outlook
+        pythoncom.CoInitialize()  # Initialize COM for this thread
+        outlook = win32com.client.Dispatch("Outlook.Application")
+        mail = outlook.CreateItem(0)  # 0 = olMailItem
+        mail.Display()
+        
+        # Give Outlook a moment to open the window
+        time.sleep(1.5)
+        
+        logger.info("New Outlook email window opened")
+        return True
+    except Exception as e:
+        logger.error(f"Error opening Outlook: {e}")
+        return False
+
+# Function to close the current email window
+def close_email_window():
+    try:
+        logger.info("Closing email window")
+        
+        # Find the Outlook window
+        window = win32gui.GetForegroundWindow()
+        
+        # Try to close it properly
+        try:
+            win32gui.PostMessage(window, win32con.WM_CLOSE, 0, 0)
+            time.sleep(0.5)
+            
+            # Handle potential "save draft" dialog
+            # Use tab and enter to select "Don't Save"
+            keyboard.press_and_release('tab')
+            time.sleep(0.2)
+            keyboard.press_and_release('tab')
+            time.sleep(0.2)
+            keyboard.press_and_release('enter')
+            
+            logger.info("Email window closed")
+        except Exception as e:
+            logger.error(f"Error closing window gracefully: {e}")
+            # Force close as a fallback
+            try:
+                keyboard.press_and_release('alt+f4')
+                time.sleep(0.5)
+                keyboard.press_and_release('tab')
+                time.sleep(0.2)
+                keyboard.press_and_release('enter')  # Don't save
+            except:
+                pass
+            
+        return True
+    except Exception as e:
+        logger.error(f"Error in close_email_window: {e}")
+        return False
+
+# Function to simulate typing in Outlook
+def simulate_outlook_email_typing():
+    try:
+        logger.info("Starting Outlook email typing simulation")
+        
+        # Open a new email
+        if not open_new_outlook_email():
+            logger.error("Failed to open Outlook - trying alternative method")
+            # Alternative: try pyautogui approach
+            pyautogui.hotkey('ctrl', 'shift', 'm')
+            time.sleep(2)
+        
+        # Tab to the subject field
+        keyboard.press_and_release('tab')
+        time.sleep(0.5)
+        
+        # Type a subject
+        subject = f"Draft - {random.choice(FINANCE_KEYWORDS)}"
+        simulate_human_typing(subject)
+        time.sleep(0.8)
+        
+        # Tab to the body
+        keyboard.press_and_release('tab')
+        time.sleep(0.5)
+        
+        # Type some content in the body
+        # Create a paragraph with 3-5 sentences using finance keywords
+        num_sentences = random.randint(3, 5)
+        for _ in range(num_sentences):
+            # Build a sentence with a finance keyword
+            sentence = f"The {random.choice(FINANCE_KEYWORDS).lower()} "
+            
+            # Add some common phrases
+            phrases = [
+                "needs to be completed by end of week.",
+                "was discussed in yesterday's meeting.",
+                "requires additional documentation.",
+                "has been updated with new requirements.",
+                "should be reviewed by the team.",
+                "will be included in the quarterly report.",
+                "needs sign-off from compliance.",
+                "has been flagged for additional review.",
+                "shows promising improvement in metrics.",
+                "indicates potential areas of concern."
+            ]
+            
+            sentence += random.choice(phrases)
+            simulate_human_typing(sentence + " ")
+            
+            # Add random pauses between sentences
+            time.sleep(random.uniform(0.8, 2.0))
+        
+        # Let the email sit open for a bit (as if reading/reviewing)
+        time.sleep(random.uniform(5, 10))
+        
+        # Close without saving
+        close_email_window()
+        
+        logger.info("Email typing simulation completed")
+        return True
+    except Exception as e:
+        logger.error(f"Error in email simulation: {e}")
+        # Try to recover by closing any open windows
+        try:
+            keyboard.press_and_release('alt+f4')
+            time.sleep(0.5)
+            keyboard.press_and_release('tab')
+            time.sleep(0.2)
+            keyboard.press_and_release('enter')  # Don't save
+        except:
+            pass
+        return False
+
+# Function to simulate realistic human mouse movement
+def simulate_human_mouse_movement():
     # Get current mouse position
     point = wintypes.POINT()
     user32.GetCursorPos(ctypes.byref(point))
+    current_x, current_y = point.x, point.y
     
-    # Move mouse to a very nearby position (1-3 pixels in random direction)
-    x_offset = random.randint(-3, 3)
-    y_offset = random.randint(-3, 3)
+    # Get screen dimensions for bounds checking
+    screen_width = user32.GetSystemMetrics(0)
+    screen_height = user32.GetSystemMetrics(1)
     
-    # If both offsets are 0, make a minimum movement
-    if x_offset == 0 and y_offset == 0:
-        x_offset = 1
+    # Generate a natural destination within screen bounds
+    # Typically humans move mouse 100-500 pixels in a single motion
+    move_distance = random.randint(100, 400)
+    angle = random.uniform(0, 2 * 3.14159)  # Random direction in radians
     
-    # Move mouse
-    user32.SetCursorPos(point.x + x_offset, point.y + y_offset)
-    time.sleep(0.05)
+    # Calculate destination with bounds checking
+    dest_x = min(max(int(current_x + move_distance * math.cos(angle)), 10), screen_width - 10)
+    dest_y = min(max(int(current_y + move_distance * math.sin(angle)), 10), screen_height - 10)
     
-    # Move mouse back to original position
-    user32.SetCursorPos(point.x, point.y)
+    logger.info(f"Moving mouse from ({current_x}, {current_y}) to ({dest_x}, {dest_y})")
+    
+    # Number of steps for the movement (higher = smoother)
+    steps = random.randint(10, 25)
+    
+    # Human mouse movements typically follow a slight curve and have variable speed
+    # (acceleration and deceleration at start/end)
+    for i in range(0, steps + 1):
+        # Ease in/out function for natural acceleration/deceleration
+        t = i / steps
+        ease = 3 * (t ** 2) - 2 * (t ** 3)  # Smooth step function
+        
+        # Add a slight curve to the movement
+        curve_x = random.randint(-10, 10) * math.sin(math.pi * t)
+        curve_y = random.randint(-10, 10) * math.sin(math.pi * t)
+        
+        # Calculate intermediate position
+        x = int(current_x + (dest_x - current_x) * ease + curve_x)
+        y = int(current_y + (dest_y - current_y) * ease + curve_y)
+        
+        # Keep within screen bounds
+        x = min(max(x, 0), screen_width)
+        y = min(max(y, 0), screen_height)
+        
+        # Move mouse
+        user32.SetCursorPos(x, y)
+        
+        # Random sleep between steps (variability in movement speed)
+        step_sleep = random.uniform(0.005, 0.015)
+        time.sleep(step_sleep)
+    
+    # Small pause at destination (as humans often do)
+    time.sleep(random.uniform(0.1, 0.3))
     
     # Log the activity
-    logger.info(f"Mouse moved by ({x_offset}, {y_offset}) pixels and returned to position ({point.x}, {point.y})")
-
-# Function to simulate pressing a harmless key (e.g., NumLock or Scroll Lock)
-def simulate_harmless_key_press():
-    # Key codes for non-disruptive keys
-    VK_SCROLL = 0x91  # Scroll Lock
-    
-    # Press and release Scroll Lock
-    user32.keybd_event(VK_SCROLL, 0, 0, 0)
-    time.sleep(0.05)
-    user32.keybd_event(VK_SCROLL, 0, KEYEVENTF_KEYUP, 0)
-    
-    # Log the activity
-    logger.info("Simulated Scroll Lock key press")
+    logger.info(f"Mouse movement completed to position ({dest_x}, {dest_y})")
 
 # Function to simulate human activity
 def simulate_activity():
-    # Randomly choose between mouse movement and key press
-    activity_type = "mouse movement" if random.random() < 0.7 else "key press" 
+    # First, always include a mouse movement regardless of other activities
+    logger.info("Simulating human mouse movement")
+    simulate_human_mouse_movement()
     
-    # Log before simulation
-    logger.info(f"Simulating {activity_type}")
+    # Then, decide if we should also do email typing
+    activity_choice = random.random()
     
-    # Perform the activity
-    if activity_type == "mouse movement":
-        simulate_subtle_mouse_movement()
-    else:
-        simulate_harmless_key_press()
+    # 70% chance for realistic email typing
+    if activity_choice < 0.7:
+        logger.info("Starting email typing simulation")
+        simulate_outlook_email_typing()
+    
+    # Add a slight pause between activities if we did both
+    time.sleep(random.uniform(1.0, 2.0))
     
     # Log completion
     logger.info(f"Activity simulation completed at {time.strftime('%H:%M:%S')}")
@@ -209,9 +418,17 @@ if __name__ == "__main__":
         monitor_thread = threading.Thread(target=monitor_user_activity, daemon=True)
         monitor_thread.start()
         
+        # Log startup information
+        logger.info(f"Script started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info(f"Python version: {sys.version}")
+        logger.info(f"Operating system: {sys.platform}")
+        
         # Start keep-active function
         keep_active()
         
     except KeyboardInterrupt:
-        print("Keep-active service stopped.")
+        logger.info("Keep-active service stopped by user.")
         sys.exit(0)
+    except Exception as e:
+        logger.critical(f"Critical error: {e}")
+        sys.exit(1)
