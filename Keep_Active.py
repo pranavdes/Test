@@ -263,7 +263,7 @@ def simulate_human_mouse_movement():
     # Log the activity
     logger.info(f"Mouse movement completed to position ({dest_x}, {dest_y})")
 
-# Function to open a new Outlook email
+# Function to open a new Outlook email and ensure it has focus
 def open_new_outlook_email():
     try:
         logger.info("Opening new Outlook email")
@@ -277,11 +277,61 @@ def open_new_outlook_email():
         # Give Outlook a moment to open the window
         time.sleep(1.5)
         
-        logger.info("New Outlook email window opened")
-        return True
+        # Find and focus the Outlook window
+        # Look for windows with "Message" in the title (Outlook email windows)
+        outlook_window = None
+        
+        def enum_windows_callback(hwnd, results):
+            if win32gui.IsWindowVisible(hwnd):
+                window_title = win32gui.GetWindowText(hwnd)
+                # Look for typical Outlook email window titles
+                if " - Message" in window_title or "Untitled - Message" in window_title:
+                    results.append(hwnd)
+                    return False  # Stop enumeration once found
+            return True
+        
+        outlook_windows = []
+        win32gui.EnumWindows(enum_windows_callback, outlook_windows)
+        
+        if outlook_windows:
+            outlook_window = outlook_windows[0]
+            # Bring window to foreground and give it focus
+            try:
+                # First, check if window is minimized
+                if win32gui.IsIconic(outlook_window):
+                    win32gui.ShowWindow(outlook_window, win32con.SW_RESTORE)
+                
+                # Set foreground window
+                win32gui.SetForegroundWindow(outlook_window)
+                # Store window handle for later use
+                global current_outlook_window
+                current_outlook_window = outlook_window
+                
+                logger.info(f"Outlook window focused with handle: {outlook_window}")
+                
+                # Extra time to ensure focus
+                time.sleep(1.0)
+                return True
+            except Exception as e:
+                logger.error(f"Error setting focus to Outlook window: {e}")
+                # Fall back to alternative focus method
+                try:
+                    shell = win32com.client.Dispatch("WScript.Shell")
+                    shell.AppActivate(win32gui.GetWindowText(outlook_window))
+                    time.sleep(1.0)
+                    current_outlook_window = outlook_window
+                    return True
+                except:
+                    logger.error("Failed to activate Outlook window with alternative method")
+        
+        logger.error("No Outlook email windows found after creation")
+        return False
     except Exception as e:
         logger.error(f"Error opening Outlook: {e}")
         return False
+
+# Global variable to track the current Outlook window handle
+current_outlook_window = None
 
 # Function to close the current email window
 def close_email_window():
