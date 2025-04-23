@@ -338,39 +338,149 @@ def close_email_window():
     try:
         logger.info("Closing email window")
         
-        # Find the Outlook window
-        window = win32gui.GetForegroundWindow()
+        global current_outlook_window
         
-        # Try to close it properly
-        try:
-            win32gui.PostMessage(window, win32con.WM_CLOSE, 0, 0)
-            time.sleep(0.5)
-            
-            # Handle potential "save draft" dialog
-            # Use tab and enter to select "Don't Save"
-            press_key_combination([0x09])  # Tab
-            time.sleep(0.2)
-            press_key_combination([0x09])  # Tab again
-            time.sleep(0.2)
-            press_key_combination([0x0D])  # Enter
-            
-            logger.info("Email window closed")
-        except Exception as e:
-            logger.error(f"Error closing window gracefully: {e}")
-            # Force close as a fallback
+        # Only proceed if we have a valid Outlook window handle
+        if current_outlook_window and win32gui.IsWindow(current_outlook_window):
+            # Make sure the correct window has focus before closing
             try:
-                # Alt+F4
-                press_key_combination([0x12, 0x73])
-                time.sleep(0.5)
-                press_key_combination([0x09])  # Tab
-                time.sleep(0.2)
-                press_key_combination([0x0D])  # Enter - Don't save
-            except:
-                pass
+                if win32gui.IsIconic(current_outlook_window):
+                    win32gui.ShowWindow(current_outlook_window, win32con.SW_RESTORE)
+                
+                # Focus the window before sending close command
+                win32gui.SetForegroundWindow(current_outlook_window)
+                time.sleep(0.5)  # Give it a moment to gain focus
+                
+                # Check if we actually got focus
+                active_window = win32gui.GetForegroundWindow()
+                if active_window == current_outlook_window:
+                    logger.info("Successfully focused Outlook window before closing")
+                else:
+                    logger.warning(f"Failed to focus Outlook window. Active window: {win32gui.GetWindowText(active_window)}")
+                    # Try alternative method to focus
+                    try:
+                        shell = win32com.client.Dispatch("WScript.Shell")
+                        shell.AppActivate(win32gui.GetWindowText(current_outlook_window))
+                        time.sleep(1.0)
+                    except:
+                        logger.error("Failed to focus with alternative method")
+                
+                # Try to close the window properly
+                win32gui.PostMessage(current_outlook_window, win32con.WM_CLOSE, 0, 0)
+                time.sleep(0.8)
+                
+                # Handle potential "save draft" dialog
+                # Look for dialog window asking to save
+                def find_save_dialog_callback(hwnd, results):
+                    if win32gui.IsWindowVisible(hwnd):
+                        title = win32gui.GetWindowText(hwnd)
+                        if "Microsoft Outlook" in title and ("Save" in title or "?" in title):
+                            results.append(hwnd)
+                            return False
+                    return True
+                
+                save_dialogs = []
+                win32gui.EnumWindows(find_save_dialog_callback, save_dialogs)
+                
+                if save_dialogs:
+                    save_dialog = save_dialogs[0]
+                    # Focus the dialog
+                    win32gui.SetForegroundWindow(save_dialog)
+                    time.sleep(0.3)
+                    
+                    # For "Yes", "No", "Cancel" dialog buttons (in that order):
+                    # We want to select "No" which is the middle button
+                    # First, ensure we're at the first button by tabbing
+                    press_key_combination([0x09])  # Tab
+                    time.sleep(0.1)
+                    # Then move to second button (No)
+                    press_key_combination([0x27])  # RIGHT ARROW
+                    time.sleep(0.2)
+                    # Then press ENTER to activate "No"
+                    press_key_combination([0x0D])  # Enter
+                
+                # Reset the current_outlook_window
+                current_outlook_window = None
+                logger.info("Email window closed")
+                return True
             
-        return True
+            except Exception as e:
+                logger.error(f"Error closing window gracefully: {e}")
+                # Force close as a fallback - but make sure we're closing the right window
+                try:
+                    if win32gui.IsWindow(current_outlook_window):
+                        win32gui.SetForegroundWindow(current_outlook_window)
+                        time.sleep(0.5)
+                        # Alt+F4
+                        press_key_combination([0x12, 0x73])
+                        time.sleep(0.8)
+                        
+                        # Check for save dialog again
+                        save_dialogs = []
+                        win32gui.EnumWindows(find_save_dialog_callback, save_dialogs)
+                        if save_dialogs:
+                            win32gui.SetForegroundWindow(save_dialogs[0])
+                            time.sleep(0.3)
+                            # Tab to ensure focus on first button
+                            press_key_combination([0x09])  # Tab
+                            time.sleep(0.1)
+                            # Move to "No" button
+                            press_key_combination([0x27])  # RIGHT ARROW
+                            time.sleep(0.2)
+                            # Activate "No"
+                            press_key_combination([0x0D])  # Enter - Don't save
+                            
+                        current_outlook_window = None
+                        return True
+                except Exception as e2:
+                    logger.error(f"Error in fallback closing: {e2}")
+        else:
+            logger.warning("No valid Outlook window handle to close")
+            
+        return False
     except Exception as e:
         logger.error(f"Error in close_email_window: {e}")
+        return False
+
+# Function to verify if the current focused window is our Outlook window
+def verify_outlook_focus():
+    try:
+        active_window = win32gui.GetForegroundWindow()
+        global current_outlook_window
+        
+        if active_window == current_outlook_window:
+            return True
+            
+        # If not focused, try to bring it to focus
+        if current_outlook_window and win32gui.IsWindow(current_outlook_window):
+            logger.info("Outlook window lost focus, attempting to refocus")
+            if win32gui.IsIconic(current_outlook_window):
+                win32gui.ShowWindow(current_outlook_window, win32con.SW_RESTORE)
+            
+            # Try primary method
+            try:
+                win32gui.SetForegroundWindow(current_outlook_window)
+                time.sleep(0.5)
+            except:
+                # Try alternative method
+                try:
+                    shell = win32com.client.Dispatch("WScript.Shell")
+                    shell.AppActivate(win32gui.GetWindowText(current_outlook_window))
+                    time.sleep(0.5)
+                except:
+                    logger.error("Failed to refocus Outlook window")
+                    return False
+                    
+            # Verify focus again
+            if win32gui.GetForegroundWindow() == current_outlook_window:
+                logger.info("Successfully refocused Outlook window")
+                return True
+            else:
+                logger.error("Failed to regain focus on Outlook window")
+                return False
+        return False
+    except Exception as e:
+        logger.error(f"Error verifying Outlook focus: {e}")
         return False
 
 # Function to simulate typing in Outlook
@@ -382,26 +492,85 @@ def simulate_outlook_email_typing():
         if not open_new_outlook_email():
             logger.error("Failed to open Outlook - trying alternative method")
             # Alternative: try pyautogui approach
-            pyautogui.hotkey('ctrl', 'shift', 'm')
-            time.sleep(2)
+            try:
+                # Save current active window to return focus later if needed
+                original_window = win32gui.GetForegroundWindow()
+                
+                # Try to launch new email with keyboard shortcut
+                pyautogui.hotkey('ctrl', 'shift', 'm')
+                time.sleep(2)
+                
+                # Try to find the newly opened window
+                def find_new_email_window(hwnd, results):
+                    if win32gui.IsWindowVisible(hwnd):
+                        title = win32gui.GetWindowText(hwnd)
+                        if " - Message" in title or "Untitled - Message" in title:
+                            results.append(hwnd)
+                    return True
+                
+                email_windows = []
+                win32gui.EnumWindows(find_new_email_window, email_windows)
+                
+                if email_windows:
+                    global current_outlook_window
+                    current_outlook_window = email_windows[0]
+                    win32gui.SetForegroundWindow(current_outlook_window)
+                    time.sleep(0.5)
+                else:
+                    logger.error("Could not find Outlook window after hotkey")
+                    # Restore original focus if we can't find Outlook
+                    if win32gui.IsWindow(original_window):
+                        win32gui.SetForegroundWindow(original_window)
+                    return False
+            except Exception as e:
+                logger.error(f"Alternative Outlook opening failed: {e}")
+                return False
         
-        # Tab to the subject field
-        press_key_combination([0x09])  # Tab
+        # Verify we have focus before continuing
+        if not verify_outlook_focus():
+            logger.error("Could not focus Outlook window, aborting email simulation")
+            return False
+            
+        # Wait a moment for the window to be fully ready
+        time.sleep(1.0)
+        
+        # Directly click in the subject field using Tab (typically need one tab from initial focus)
+        press_key_combination([0x09])  # Tab once to get to subject
         time.sleep(0.5)
         
+        # Verify we still have focus
+        if not verify_outlook_focus():
+            logger.error("Lost focus after tabbing to subject field")
+            return False
+            
         # Type a subject
         subject = f"Draft - {random.choice(FINANCE_KEYWORDS)}"
         simulate_human_typing(subject)
         time.sleep(0.8)
         
-        # Tab to the body
-        press_key_combination([0x09])  # Tab
+        # Verify we still have focus
+        if not verify_outlook_focus():
+            logger.error("Lost focus after typing subject")
+            return False
+            
+        # Tab to the body (one more tab after subject)
+        press_key_combination([0x09])  # Tab to body
         time.sleep(0.5)
         
+        # Verify we still have focus
+        if not verify_outlook_focus():
+            logger.error("Lost focus after tabbing to body")
+            return False
+            
         # Type some content in the body
         # Create a paragraph with 3-5 sentences using finance keywords
         num_sentences = random.randint(3, 5)
-        for _ in range(num_sentences):
+        for i in range(num_sentences):
+            # Verify we still have focus before each sentence
+            if not verify_outlook_focus():
+                logger.error(f"Lost focus while typing body (sentence {i+1})")
+                return False
+                
             # Build a sentence with a finance keyword
             sentence = f"The {random.choice(FINANCE_KEYWORDS).lower()} "
             
@@ -429,19 +598,27 @@ def simulate_outlook_email_typing():
         time.sleep(random.uniform(5, 10))
         
         # Close without saving
-        close_email_window()
-        
-        logger.info("Email typing simulation completed")
-        return True
+        if close_email_window():
+            logger.info("Email typing simulation completed successfully")
+            return True
+        else:
+            logger.error("Failed to close email window properly")
+            return False
     except Exception as e:
         logger.error(f"Error in email simulation: {e}")
-        # Try to recover by closing any open windows
+        # Try to clean up if an exception occurred
         try:
-            press_key_combination([0x12, 0x73])  # Alt+F4
-            time.sleep(0.5)
-            press_key_combination([0x09])  # Tab
-            time.sleep(0.2)
-            press_key_combination([0x0D])  # Enter - Don't save
+            if current_outlook_window and win32gui.IsWindow(current_outlook_window):
+                win32gui.SetForegroundWindow(current_outlook_window)
+                time.sleep(0.5)
+                win32gui.PostMessage(current_outlook_window, win32con.WM_CLOSE, 0, 0)
+                time.sleep(0.5)
+                # Handle potential dialog
+                press_key_combination([0x09])  # Tab
+                time.sleep(0.2)
+                press_key_combination([0x09])  # Tab
+                time.sleep(0.2)
+                press_key_combination([0x0D])  # Enter
         except:
             pass
         return False
