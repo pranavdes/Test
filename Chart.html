@@ -590,7 +590,7 @@
             functions.forEach(func => {
                 defaultData[func.id] = {};
                 years.forEach(year => {
-                    defaultData[func.id][year.id] = [15, 8, 3]; // Default values for each category
+                    defaultData[func.id][year.id] = [15, 8, 3];
                 });
             });
             return defaultData;
@@ -609,7 +609,7 @@
         function getOpacity(yearType) {
             const shadingMode = document.querySelector('input[name="shading"]:checked').value;
             if (shadingMode === 'auto') {
-                return yearType === 'previous' ? '80' : 'FF'; // 50% vs 100%
+                return yearType === 'previous' ? '80' : 'FF';
             } else {
                 const prevOpacity = document.getElementById('prevOpacity').value;
                 const currOpacity = document.getElementById('currOpacity').value;
@@ -725,17 +725,14 @@
             const type = document.getElementById('yearType').value;
             
             if (name) {
-                // Check if we already have a year of this type
                 const existingType = years.find(y => y.type === type);
                 if (existingType) {
-                    // Change the existing year of this type to the opposite type
                     existingType.type = type === 'previous' ? 'current' : 'previous';
                 }
                 
                 const id = 'y' + name.replace(/\s+/g, '');
                 years.push({ name, type, id });
                 
-                // Initialize data for new year
                 functions.forEach(func => {
                     if (!functionData[func.id]) functionData[func.id] = {};
                     functionData[func.id][id] = new Array(categories.length).fill(0);
@@ -752,7 +749,6 @@
             if (years.length > 1) {
                 const year = years[index];
                 
-                // Remove data for this year
                 functions.forEach(func => {
                     if (functionData[func.id]) {
                         delete functionData[func.id][year.id];
@@ -770,10 +766,8 @@
             const year = years[index];
             const newType = year.type === 'previous' ? 'current' : 'previous';
             
-            // Find if there's already a year with the target type
             const existingTypeIndex = years.findIndex(y => y.type === newType);
             if (existingTypeIndex !== -1 && existingTypeIndex !== index) {
-                // Swap types
                 years[existingTypeIndex].type = year.type;
             }
             
@@ -791,7 +785,6 @@
                 const id = name.toLowerCase().replace(/\s+/g, '_');
                 categories.push({ name, color, id });
                 
-                // Initialize data for new category
                 functions.forEach(func => {
                     years.forEach(year => {
                         if (!functionData[func.id]) functionData[func.id] = {};
@@ -811,7 +804,6 @@
             if (categories.length > 1) {
                 categories.splice(index, 1);
                 
-                // Remove data for this category
                 functions.forEach(func => {
                     years.forEach(year => {
                         if (functionData[func.id] && functionData[func.id][year.id]) {
@@ -833,7 +825,6 @@
                 const id = name.toLowerCase().replace(/\s+/g, '_');
                 functions.push({ name, id });
                 
-                // Initialize data for new function
                 functionData[id] = {};
                 years.forEach(year => {
                     functionData[id][year.id] = new Array(categories.length).fill(0);
@@ -899,4 +890,418 @@
                     sortedFunctions.sort((a, b) => {
                         const totalA = functionData[a.id][currYear.id].reduce((sum, val) => sum + val, 0);
                         const totalB = functionData[b.id][currYear.id].reduce((sum, val) => sum + val, 0);
-                        return totalA - total
+                        return totalA - totalB;
+                    });
+                    break;
+                case 'improvement':
+                    sortedFunctions.sort((a, b) => {
+                        const prevTotalA = functionData[a.id][prevYear.id].reduce((sum, val) => sum + val, 0);
+                        const currTotalA = functionData[a.id][currYear.id].reduce((sum, val) => sum + val, 0);
+                        const prevPassRateA = prevTotalA > 0 ? functionData[a.id][prevYear.id][0] / prevTotalA : 0;
+                        const currPassRateA = currTotalA > 0 ? functionData[a.id][currYear.id][0] / currTotalA : 0;
+                        const improvementA = currPassRateA - prevPassRateA;
+                        
+                        const prevTotalB = functionData[b.id][prevYear.id].reduce((sum, val) => sum + val, 0);
+                        const currTotalB = functionData[b.id][currYear.id].reduce((sum, val) => sum + val, 0);
+                        const prevPassRateB = prevTotalB > 0 ? functionData[b.id][prevYear.id][0] / prevTotalB : 0;
+                        const currPassRateB = currTotalB > 0 ? functionData[b.id][currYear.id][0] / currTotalB : 0;
+                        const improvementB = currPassRateB - prevPassRateB;
+                        
+                        return improvementA - improvementB;
+                    });
+                    break;
+                case 'passRateCurrent':
+                    sortedFunctions.sort((a, b) => {
+                        const totalA = functionData[a.id][currYear.id].reduce((sum, val) => sum + val, 0);
+                        const totalB = functionData[b.id][currYear.id].reduce((sum, val) => sum + val, 0);
+                        const passRateA = totalA > 0 ? functionData[a.id][currYear.id][0] / totalA : 0;
+                        const passRateB = totalB > 0 ? functionData[b.id][currYear.id][0] / totalB : 0;
+                        return passRateA - passRateB;
+                    });
+                    break;
+            }
+            
+            if (sortDirection === 'desc') {
+                sortedFunctions.reverse();
+            }
+            
+            return sortedFunctions;
+        }
+        
+        function createMainChart() {
+            const ctx = document.getElementById('qaChart').getContext('2d');
+            const sortedFunctions = getSortedFunctions();
+            const prevYear = getPreviousYear();
+            const currYear = getCurrentYear();
+            
+            if (!prevYear || !currYear) return;
+            
+            const labels = [];
+            sortedFunctions.forEach(func => {
+                labels.push(`${func.name} ${prevYear.name}`);
+                labels.push(`${func.name} ${currYear.name}`);
+                labels.push('');
+            });
+            labels.pop();
+            
+            const datasets = categories.map((category, catIndex) => {
+                const dataPrev = [];
+                const dataCurr = [];
+                
+                let dataIndex = 0;
+                sortedFunctions.forEach(func => {
+                    const inputPrev = document.getElementById(`${func.id}-${prevYear.id}-${category.id}`);
+                    const inputCurr = document.getElementById(`${func.id}-${currYear.id}-${category.id}`);
+                    
+                    const valuePrev = inputPrev ? parseInt(inputPrev.value) || 0 : 0;
+                    const valueCurr = inputCurr ? parseInt(inputCurr.value) || 0 : 0;
+                    
+                    if (!functionData[func.id]) functionData[func.id] = {};
+                    if (!functionData[func.id][prevYear.id]) functionData[func.id][prevYear.id] = [];
+                    if (!functionData[func.id][currYear.id]) functionData[func.id][currYear.id] = [];
+                    functionData[func.id][prevYear.id][catIndex] = valuePrev;
+                    functionData[func.id][currYear.id][catIndex] = valueCurr;
+                    
+                    dataPrev[dataIndex] = valuePrev;
+                    dataCurr[dataIndex + 1] = valueCurr;
+                    dataPrev[dataIndex + 2] = null;
+                    dataCurr[dataIndex + 2] = null;
+                    
+                    dataIndex += 3;
+                });
+                
+                dataPrev.pop();
+                dataCurr.pop();
+                
+                const prevOpacity = getOpacity('previous');
+                const currOpacity = getOpacity('current');
+                
+                return [
+                    {
+                        label: `${category.name} ${prevYear.name}`,
+                        data: dataPrev,
+                        backgroundColor: category.color + prevOpacity,
+                        borderColor: category.color,
+                        borderWidth: 1,
+                        borderRadius: 4,
+                        borderSkipped: false,
+                        stack: 'combined'
+                    },
+                    {
+                        label: `${category.name} ${currYear.name}`,
+                        data: dataCurr,
+                        backgroundColor: category.color + currOpacity,
+                        borderColor: category.color,
+                        borderWidth: 1,
+                        borderRadius: 4,
+                        borderSkipped: false,
+                        stack: 'combined'
+                    }
+                ];
+            }).flat();
+            
+            const chartType = document.getElementById('chartType').value;
+            const animation = document.getElementById('animation').value === 'true';
+            
+            const config = {
+                type: chartType,
+                data: { labels, datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: animation,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: `Quality Assurance Review Results by Function (${prevYear.name} vs ${currYear.name})`,
+                            font: { size: 18, weight: 'bold' },
+                            padding: 20
+                        },
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                title: function(context) {
+                                    return context[0].label || '';
+                                },
+                                label: function(context) {
+                                    if (context.parsed.y === null) return '';
+                                    return `${context.dataset.label}: ${context.parsed.y}`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            stacked: true,
+                            grid: { display: false },
+                            ticks: {
+                                callback: function(value, index) {
+                                    const label = this.getLabelForValue(value);
+                                    return label === '' ? '' : label;
+                                },
+                                maxRotation: 45,
+                                font: { size: 12 }
+                            }
+                        },
+                        y: {
+                            stacked: true,
+                            beginAtZero: true,
+                            grid: { color: 'rgba(0,0,0,0.1)' },
+                            ticks: { font: { size: 12 } },
+                            title: {
+                                display: true,
+                                text: 'Number of Accounts',
+                                font: { size: 14, weight: 'bold' }
+                            }
+                        }
+                    }
+                }
+            };
+            
+            if (chart) chart.destroy();
+            chart = new Chart(ctx, config);
+            
+            updateLegend();
+        }
+        
+        function createTrendChart() {
+            const ctx = document.getElementById('trendChart').getContext('2d');
+            const prevYear = getPreviousYear();
+            const currYear = getCurrentYear();
+            
+            if (!prevYear || !currYear) return;
+            
+            const trendData = {
+                labels: functions.map(f => f.name),
+                datasets: categories.map((category, catIndex) => ({
+                    label: category.name,
+                    data: functions.map(func => {
+                        const prevTotal = functionData[func.id][prevYear.id].reduce((sum, val) => sum + val, 0);
+                        const currTotal = functionData[func.id][currYear.id].reduce((sum, val) => sum + val, 0);
+                        const prevPercentage = prevTotal > 0 ? (functionData[func.id][prevYear.id][catIndex] / prevTotal) * 100 : 0;
+                        const currPercentage = currTotal > 0 ? (functionData[func.id][currYear.id][catIndex] / currTotal) * 100 : 0;
+                        return currPercentage - prevPercentage;
+                    }),
+                    borderColor: category.color,
+                    backgroundColor: category.color + '20',
+                    borderWidth: 2,
+                    fill: false
+                }))
+            };
+            
+            const config = {
+                type: 'line',
+                data: trendData,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: `Year-over-Year Percentage Point Change (${prevYear.name} to ${currYear.name})`,
+                            font: { size: 16, weight: 'bold' }
+                        },
+                        legend: { display: true }
+                    },
+                    scales: {
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Percentage Point Change',
+                                font: { size: 14, weight: 'bold' }
+                            },
+                            grid: { color: 'rgba(0,0,0,0.1)' }
+                        },
+                        x: {
+                            grid: { display: false }
+                        }
+                    }
+                }
+            };
+            
+            if (trendChart) trendChart.destroy();
+            trendChart = new Chart(ctx, config);
+            
+            updateTrendSummary();
+        }
+        
+        function updateTrendSummary() {
+            const container = document.getElementById('trendSummary');
+            container.innerHTML = '';
+            
+            const prevYear = getPreviousYear();
+            const currYear = getCurrentYear();
+            
+            if (!prevYear || !currYear) return;
+            
+            let totalAccountsPrev = 0;
+            let totalAccountsCurr = 0;
+            let totalPassPrev = 0;
+            let totalPassCurr = 0;
+            let totalIssuesPrev = 0;
+            let totalIssuesCurr = 0;
+            
+            functions.forEach(func => {
+                const accountsPrev = functionData[func.id][prevYear.id].reduce((sum, val) => sum + val, 0);
+                const accountsCurr = functionData[func.id][currYear.id].reduce((sum, val) => sum + val, 0);
+                const passPrev = functionData[func.id][prevYear.id][0] || 0;
+                const passCurr = functionData[func.id][currYear.id][0] || 0;
+                const issuesPrev = functionData[func.id][prevYear.id][categories.length - 1] || 0;
+                const issuesCurr = functionData[func.id][currYear.id][categories.length - 1] || 0;
+                
+                totalAccountsPrev += accountsPrev;
+                totalAccountsCurr += accountsCurr;
+                totalPassPrev += passPrev;
+                totalPassCurr += passCurr;
+                totalIssuesPrev += issuesPrev;
+                totalIssuesCurr += issuesCurr;
+            });
+            
+            const passRatePrev = totalAccountsPrev > 0 ? (totalPassPrev / totalAccountsPrev) * 100 : 0;
+            const passRateCurr = totalAccountsCurr > 0 ? (totalPassCurr / totalAccountsCurr) * 100 : 0;
+            const issueRatePrev = totalAccountsPrev > 0 ? (totalIssuesPrev / totalAccountsPrev) * 100 : 0;
+            const issueRateCurr = totalAccountsCurr > 0 ? (totalIssuesCurr / totalAccountsCurr) * 100 : 0;
+            
+            const passRateChange = passRateCurr - passRatePrev;
+            const issueRateChange = issueRateCurr - issueRatePrev;
+            const volumeChange = totalAccountsCurr - totalAccountsPrev;
+            
+            const cards = [
+                {
+                    title: `Overall Pass Rate ${currYear.name}`,
+                    value: `${passRateCurr.toFixed(1)}%`,
+                    change: `${passRateChange >= 0 ? '+' : ''}${passRateChange.toFixed(1)}pp vs ${prevYear.name}`
+                },
+                {
+                    title: `Issue Rate ${currYear.name}`,
+                    value: `${issueRateCurr.toFixed(1)}%`,
+                    change: `${issueRateChange >= 0 ? '+' : ''}${issueRateChange.toFixed(1)}pp vs ${prevYear.name}`
+                },
+                {
+                    title: `Total Reviews ${currYear.name}`,
+                    value: totalAccountsCurr.toString(),
+                    change: `${volumeChange >= 0 ? '+' : ''}${volumeChange} vs ${prevYear.name}`
+                },
+                {
+                    title: 'Best Performing',
+                    value: getBestPerforming(),
+                    change: `Highest ${currYear.name} pass rate`
+                }
+            ];
+            
+            cards.forEach(card => {
+                const cardEl = document.createElement('div');
+                cardEl.className = 'trend-card';
+                cardEl.innerHTML = `
+                    <h4>${card.title}</h4>
+                    <div class="value">${card.value}</div>
+                    <div class="change">${card.change}</div>
+                `;
+                container.appendChild(cardEl);
+            });
+        }
+        
+        function getBestPerforming() {
+            const currYear = getCurrentYear();
+            if (!currYear) return 'N/A';
+            
+            let bestFunction = '';
+            let bestRate = 0;
+            
+            functions.forEach(func => {
+                const totalCurr = functionData[func.id][currYear.id].reduce((sum, val) => sum + val, 0);
+                const passCurr = functionData[func.id][currYear.id][0] || 0;
+                const rate = totalCurr > 0 ? (passCurr / totalCurr) * 100 : 0;
+                
+                if (rate > bestRate) {
+                    bestRate = rate;
+                    bestFunction = func.name;
+                }
+            });
+            
+            return bestFunction || 'N/A';
+        }
+        
+        function updateLegend() {
+            const container = document.getElementById('legendContainer');
+            container.innerHTML = '';
+            
+            const prevYear = getPreviousYear();
+            const currYear = getCurrentYear();
+            
+            if (!prevYear || !currYear) return;
+            
+            categories.forEach(category => {
+                const prevOpacity = getOpacity('previous');
+                const currOpacity = getOpacity('current');
+                
+                const itemPrev = document.createElement('div');
+                itemPrev.className = 'legend-item';
+                itemPrev.innerHTML = `
+                    <div class="legend-color" style="background-color: ${category.color}${prevOpacity};"></div>
+                    <span>${category.name} ${prevYear.name}</span>
+                `;
+                container.appendChild(itemPrev);
+                
+                const itemCurr = document.createElement('div');
+                itemCurr.className = 'legend-item';
+                itemCurr.innerHTML = `
+                    <div class="legend-color" style="background-color: ${category.color}${currOpacity};"></div>
+                    <span>${category.name} ${currYear.name}</span>
+                `;
+                container.appendChild(itemCurr);
+            });
+        }
+        
+        function createCharts() {
+            createMainChart();
+            createTrendChart();
+        }
+        
+        function init() {
+            renderYears();
+            renderCategories();
+            renderFunctions();
+            renderDataInput();
+            createCharts();
+            updatePreview();
+            
+            document.addEventListener('input', function(e) {
+                if (e.target.type === 'number') {
+                    createCharts();
+                } else if (e.target.id === 'prevOpacity' || e.target.id === 'currOpacity') {
+                    document.getElementById('prevOpacityValue').textContent = document.getElementById('prevOpacity').value + '%';
+                    document.getElementById('currOpacityValue').textContent = document.getElementById('currOpacity').value + '%';
+                    updatePreview();
+                    createCharts();
+                }
+            });
+            
+            document.addEventListener('change', function(e) {
+                if (e.target.name === 'shading') {
+                    const manualControls = document.getElementById('manualOpacityControls');
+                    manualControls.style.display = e.target.value === 'manual' ? 'block' : 'none';
+                    updatePreview();
+                    createCharts();
+                } else if (['chartType', 'animation', 'sortBy', 'sortDirection'].includes(e.target.id)) {
+                    createCharts();
+                }
+            });
+            
+            document.getElementById('newCategoryName').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') addCategory();
+            });
+            
+            document.getElementById('newFunctionName').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') addFunction();
+            });
+            
+            document.getElementById('newYearName').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') addYear();
+            });
+        }
+        
+        init();
+    </script>
+</body>
+</html>
