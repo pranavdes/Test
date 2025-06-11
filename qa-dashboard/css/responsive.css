@@ -1,0 +1,822 @@
+/* ===========================================
+   QA DASHBOARD - RESPONSIVE CSS
+   Media queries and responsive design for all screen sizes
+   =========================================== */
+
+/* ===== RESPONSIVE BREAKPOINTS ===== */
+/* 
+   Breakpoint Strategy:
+   - Mobile: 0-575px (Extra Small)
+   - Mobile Large: 576-767px (Small)
+   - Tablet: 768-991px (Medium)
+   - Desktop: 992-1199px (Large)
+   - Large Desktop: 1200px+ (Extra Large)
+*/
+
+/* ===== LARGE DESKTOP SCREENS (1200px and up) ===== */
+@media (min-width: 1200px) {
+    /* Enhanced layout for large screens */
+    .container {
+        max-width: 1800px;
+        margin: 0 auto;
+    }
+    
+    .dashboard {
+        grid-template-columns: 1fr 450px;
+        gap: var(--spacing-xl);
+        padding: var(--spacing-xl);
+    }
+    
+    .header h1 {
+        font-size: var(--font-size-4xl);
+    }
+    
+    .header p {
+        font-size: var(--font-size-lg);
+    }
+    
+    .controls {
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: var(--spacing-xl);
+    }
+    
+    /* Enhanced sidebar for large screens */
+    .sidebar {
+        padding: var(--spacing-xl);
+        max-height: 85vh;
+    }
+    
+    .chart-container {
+        padding: var(--spacing-2xl);
+        min-height: 500px;
+    }
+    
+    /* Larger text styling controls */
+    .text-styling-controls {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: var(--spacing-lg);
+    }
+    
+    .trendline-controls {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: var(--spacing-lg);
+    }
+    
+    /* Enhanced trend summary */
+    .trend-summary {
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: var(--spacing-xl);
+    }
+    
+    /* Larger legend items */
+    .legend-custom {
+        gap: var(--spacing-xl);
+    }
+    
+    .legend-item {
+        padding: var(--spacing-lg) var(--spacing-xl);
+        font-size: var(--font-size-base);
+    }
+}
+
+/* ===== DESKTOP SCREENS (992px to 1199px) ===== */
+@media (max-width: 1199px) and (min-width: 992px) {
+    .dashboard {
+        grid-template-columns: 1fr 380px;
+        gap: var(--spacing-lg);
+    }
+    
+    .controls {
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    }
+    
+    .sidebar {
+        max-height: 88vh;
+    }
+    
+    /* Adjust chart container for medium desktop */
+    .chart-container {
+        padding: var(--spacing-lg);
+        min-height: 450px;
+    }
+    
+    /* Compact text styling controls */
+    .text-styling-controls {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: var(--spacing-base);
+    }
+    
+    .trend-summary {
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    }
+}
+
+/* ===== TABLET LANDSCAPE (768px to 991px) ===== */
+@media (max-width: 991px) and (min-width: 768px) {
+    /* Switch to single column layout */
+    .dashboard {
+        grid-template-columns: 1fr;
+        gap: var(--spacing-lg);
+        padding: var(--spacing-lg);
+    }
+    
+    /* Move sidebar to top on tablet */
+    .sidebar {
+        max-height: none;
+        order: -1;
+        padding: var(--spacing-lg);
+        margin-bottom: var(--spacing-lg);
+    }
+    
+    .main-content {
+        gap: var(--spacing-lg);
+    }
+    
+    /* Adjust header for tablet */
+    .header {
+        padding: var(--spacing-xl) var(--spacing-lg);
+    }
+    
+    .header h1 {
+        font-size: var(--font-size-3xl);
+    }
+    
+    /* Tablet controls layout */
+    .controls {
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        gap: var(--spacing-base);
+        padding: var(--spacing-lg);
+    }
+    
+    /* Tablet chart container */
+    .chart-container {
+        padding: var(--spacing-lg);
+        min-height: 400px;
+    }
+    
+    /* Horizontal layout for styling controls */
+    .text-styling-controls {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: var(--spacing-lg);
+    }
+    
+    .trendline-controls {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: var(--spacing-lg);
+    }
+    
+    /* Tablet trend summary */
+    .trend-summary {
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: var(--spacing-base);
+    }
+    
+    /* Tablet legend */
+    .legend-custom {
+        gap: var(--spacing-base);
+        flex-wrap: wrap;
+    }
+    
+    .legend-item {
+        font-size: var(--font-size-sm);
+        padding: var(--spacing-base) var(--spacing-lg);
+    }
+    
+    /* Tablet sidebar sections */
+    .section-header {
+        font-size: var(--font-size-base);
+        margin: var(--spacing-lg) 0 var(--spacing-base) 0;
+    }
+    
+    /* Tablet form controls */
+    .axis-control-group {
+        grid-template-columns: 1fr;
+        gap: var(--spacing-base);
+    }
+    
+    .trendline-controls-grid {
+        grid-template-columns: 1fr;
+        gap: var(--spacing-base);
+    }
+    
+    /* Tablet data input */
+    .grade-inputs {
+        grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+    }
+    
+    .category-header {
+        grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+    }
+}
+
+/* ===== TABLET PORTRAIT (576px to 767px) ===== */
+@media (max-width: 767px) and (min-width: 576px) {
+    /* Reduce overall padding */
+    body {
+        padding: var(--spacing-lg);
+    }
+    
+    .container {
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-lg);
+    }
+    
+    /* Compact header */
+    .header {
+        padding: var(--spacing-lg);
+        text-align: center;
+    }
+    
+    .header h1 {
+        font-size: var(--font-size-2xl);
+        line-height: var(--line-height-tight);
+    }
+    
+    .header p {
+        font-size: var(--font-size-sm);
+        margin-top: var(--spacing-sm);
+    }
+    
+    /* Single column dashboard */
+    .dashboard {
+        padding: var(--spacing-lg);
+        gap: var(--spacing-lg);
+        grid-template-columns: 1fr;
+    }
+    
+    /* Compact controls */
+    .controls {
+        grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+        gap: var(--spacing-base);
+        padding: var(--spacing-lg);
+    }
+    
+    .control-group label {
+        font-size: var(--font-size-xs);
+    }
+    
+    .control-group input,
+    .control-group select,
+    .control-group button {
+        padding: var(--spacing-sm) var(--spacing-base);
+        font-size: var(--font-size-xs);
+    }
+    
+    /* Compact chart container */
+    .chart-container {
+        padding: var(--spacing-lg);
+        min-height: 350px;
+    }
+    
+    .trend-container {
+        padding: var(--spacing-lg);
+    }
+    
+    /* Compact sidebar */
+    .sidebar {
+        padding: var(--spacing-lg);
+    }
+    
+    .section-header {
+        font-size: var(--font-size-base);
+        margin: var(--spacing-lg) 0 var(--spacing-base) 0;
+    }
+    
+    /* Stack styling controls vertically */
+    .text-styling-controls,
+    .trendline-controls {
+        display: block;
+    }
+    
+    .text-style-group,
+    .trendline-category {
+        margin-bottom: var(--spacing-lg);
+    }
+    
+    .style-controls {
+        grid-template-columns: 1fr;
+        gap: var(--spacing-base);
+    }
+    
+    .trendline-controls-grid {
+        grid-template-columns: 1fr;
+        gap: var(--spacing-base);
+    }
+    
+    /* Single column checkboxes */
+    .checkbox-group {
+        grid-template-columns: 1fr;
+    }
+    
+    /* Single column trend summary */
+    .trend-summary {
+        grid-template-columns: 1fr;
+        gap: var(--spacing-base);
+    }
+    
+    /* Compact legend */
+    .legend-custom {
+        gap: var(--spacing-sm);
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .legend-item {
+        font-size: var(--font-size-xs);
+        padding: var(--spacing-sm) var(--spacing-base);
+        justify-content: center;
+    }
+    
+    /* Tablet data input adjustments */
+    .add-item {
+        flex-direction: column;
+        gap: var(--spacing-sm);
+        align-items: stretch;
+    }
+    
+    .add-item input,
+    .add-item select,
+    .add-item button {
+        width: 100%;
+        min-width: auto;
+    }
+    
+    /* Responsive chart tools */
+    .chart-tools {
+        position: static;
+        margin-bottom: var(--spacing-base);
+        justify-content: center;
+        opacity: 1;
+    }
+}
+
+/* ===== MOBILE DEVICES (up to 575px) ===== */
+@media (max-width: 575px) {
+    /* Minimal body padding */
+    body {
+        padding: var(--spacing-base);
+        font-size: var(--font-size-sm);
+    }
+    
+    .container {
+        margin: 0;
+        border-radius: var(--radius-base);
+        box-shadow: var(--shadow-md);
+    }
+    
+    /* Mobile header */
+    .header {
+        padding: var(--spacing-lg) var(--spacing-base);
+        text-align: center;
+    }
+    
+    .header h1 {
+        font-size: var(--font-size-xl);
+        letter-spacing: 0.025em;
+        line-height: var(--line-height-tight);
+    }
+    
+    .header p {
+        font-size: var(--font-size-xs);
+        margin-top: var(--spacing-sm);
+        line-height: var(--line-height-normal);
+    }
+    
+    /* Mobile dashboard layout */
+    .dashboard {
+        padding: var(--spacing-base);
+        gap: var(--spacing-base);
+        grid-template-columns: 1fr;
+    }
+    
+    /* Mobile controls - single column */
+    .controls {
+        grid-template-columns: 1fr;
+        gap: var(--spacing-sm);
+        padding: var(--spacing-base);
+    }
+    
+    .control-group {
+        gap: var(--spacing-xs);
+    }
+    
+    .control-group label {
+        font-size: var(--font-size-xs);
+        font-weight: var(--font-weight-medium);
+    }
+    
+    .control-group input,
+    .control-group select,
+    .control-group button {
+        padding: var(--spacing-sm);
+        font-size: var(--font-size-xs);
+        min-height: 36px;
+    }
+    
+    /* Mobile chart container */
+    .chart-container {
+        padding: var(--spacing-base);
+        min-height: 300px;
+    }
+    
+    .trend-container {
+        padding: var(--spacing-base);
+    }
+    
+    /* Mobile sidebar */
+    .sidebar {
+        padding: var(--spacing-base);
+        max-height: none;
+    }
+    
+    .section-header {
+        font-size: var(--font-size-sm);
+        margin: var(--spacing-base) 0 var(--spacing-sm) 0;
+        padding-bottom: var(--spacing-xs);
+    }
+    
+    /* Mobile form sections */
+    .text-style-group,
+    .trendline-category,
+    .axis-section {
+        padding: var(--spacing-base);
+        margin-bottom: var(--spacing-base);
+    }
+    
+    .text-style-group h4,
+    .axis-section h4 {
+        font-size: var(--font-size-xs);
+        margin-bottom: var(--spacing-sm);
+    }
+    
+    .style-control input,
+    .style-control select,
+    .axis-control input {
+        padding: var(--spacing-xs);
+        font-size: var(--font-size-xs);
+        min-height: 32px;
+    }
+    
+    /* Mobile data input */
+    .data-input {
+        padding: var(--spacing-base);
+    }
+    
+    .function-input {
+        padding: var(--spacing-base);
+        margin-bottom: var(--spacing-base);
+    }
+    
+    .function-input h3 {
+        font-size: var(--font-size-sm);
+        margin-bottom: var(--spacing-base);
+    }
+    
+    .grade-inputs {
+        grid-template-columns: 1fr;
+        gap: var(--spacing-sm);
+    }
+    
+    .grade-inputs input {
+        padding: var(--spacing-sm);
+        font-size: var(--font-size-sm);
+        text-align: center;
+    }
+    
+    .category-header {
+        grid-template-columns: 1fr;
+        gap: var(--spacing-xs);
+        padding: var(--spacing-sm);
+    }
+    
+    .category-header-item {
+        padding: var(--spacing-xs);
+        font-size: var(--font-size-xs);
+    }
+    
+    /* Mobile item layouts */
+    .add-item {
+        flex-direction: column;
+        gap: var(--spacing-sm);
+        padding: var(--spacing-base);
+    }
+    
+    .add-item input,
+    .add-item select,
+    .add-item button {
+        width: 100%;
+        min-width: auto;
+        padding: var(--spacing-sm);
+    }
+    
+    .item,
+    .year-item,
+    .sort-item {
+        padding: var(--spacing-base);
+        flex-direction: column;
+        align-items: stretch;
+        gap: var(--spacing-base);
+        text-align: center;
+    }
+    
+    .item-info {
+        justify-content: center;
+        flex-direction: column;
+        gap: var(--spacing-sm);
+    }
+    
+    .item-color {
+        align-self: center;
+        margin: 0;
+    }
+    
+    .year-controls,
+    .sort-item > div:last-child {
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: var(--spacing-xs);
+    }
+    
+    .year-controls button,
+    .sort-item button {
+        font-size: var(--font-size-xs);
+        padding: var(--spacing-xs) var(--spacing-sm);
+        min-height: 28px;
+    }
+    
+    /* Mobile legend */
+    .legend-custom {
+        flex-direction: column;
+        align-items: stretch;
+        gap: var(--spacing-xs);
+        margin-top: var(--spacing-base);
+        padding-top: var(--spacing-base);
+    }
+    
+    .legend-item {
+        font-size: var(--font-size-xs);
+        padding: var(--spacing-sm);
+        justify-content: center;
+        border-radius: var(--radius-sm);
+    }
+    
+    .legend-color {
+        width: 20px;
+        height: 20px;
+    }
+    
+    /* Mobile trend cards */
+    .trend-summary {
+        grid-template-columns: 1fr;
+        gap: var(--spacing-sm);
+    }
+    
+    .trend-card {
+        padding: var(--spacing-lg);
+        text-align: center;
+    }
+    
+    .trend-card .value {
+        font-size: var(--font-size-2xl);
+        margin-bottom: var(--spacing-sm);
+    }
+    
+    .trend-card h4 {
+        font-size: var(--font-size-xs);
+    }
+    
+    .trend-card .change {
+        font-size: var(--font-size-xs);
+    }
+    
+    /* Mobile chart maximization */
+    .maximize-chart-wrapper {
+        padding: var(--spacing-base);
+    }
+    
+    .maximize-header h3 {
+        font-size: var(--font-size-lg);
+    }
+    
+    .close-maximize {
+        width: 35px;
+        height: 35px;
+        font-size: var(--font-size-lg);
+    }
+    
+    /* Mobile modals */
+    .modal {
+        margin: var(--spacing-base);
+        max-width: calc(100vw - var(--spacing-lg));
+        max-height: calc(100vh - var(--spacing-lg));
+    }
+    
+    .modal-header,
+    .modal-body,
+    .modal-footer {
+        padding: var(--spacing-base);
+    }
+    
+    .modal-header h2 {
+        font-size: var(--font-size-lg);
+    }
+    
+    /* Mobile tooltips */
+    .tooltip::before {
+        bottom: 110%;
+        font-size: var(--font-size-xs);
+        padding: var(--spacing-xs) var(--spacing-sm);
+        max-width: 150px;
+        white-space: normal;
+    }
+    
+    /* Mobile chart tools */
+    .chart-tools {
+        position: static;
+        justify-content: center;
+        margin-bottom: var(--spacing-base);
+        opacity: 1;
+        flex-wrap: wrap;
+    }
+    
+    .chart-tool-btn {
+        font-size: var(--font-size-xs);
+        padding: var(--spacing-xs);
+        min-width: 28px;
+        height: 28px;
+    }
+}
+
+/* ===== LANDSCAPE ORIENTATION (Mobile) ===== */
+@media (max-width: 767px) and (orientation: landscape) {
+    .header {
+        padding: var(--spacing-base) var(--spacing-lg);
+    }
+    
+    .header h1 {
+        font-size: var(--font-size-lg);
+    }
+    
+    .header p {
+        display: none; /* Hide subtitle in mobile landscape */
+    }
+    
+    .chart-container {
+        min-height: 250px;
+    }
+    
+    .sidebar {
+        max-height: 60vh;
+        overflow-y: auto;
+    }
+    
+    .controls {
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    }
+}
+
+/* ===== TOUCH DEVICE OPTIMIZATIONS ===== */
+@media (hover: none) and (pointer: coarse) {
+    /* Increase touch targets */
+    button,
+    input,
+    select,
+    .legend-item,
+    .checkbox-item,
+    .radio-item {
+        min-height: 44px;
+        padding: var(--spacing-base);
+    }
+    
+    /* Remove hover effects on touch devices */
+    .chart-container:hover,
+    .sidebar:hover,
+    .item:hover,
+    .year-item:hover,
+    .sort-item:hover {
+        transform: none;
+        box-shadow: var(--shadow-md);
+    }
+    
+    /* Always show chart tools on touch devices */
+    .chart-tools {
+        opacity: 1;
+    }
+    
+    /* Larger touch targets for controls */
+    .chart-tool-btn {
+        min-width: 44px;
+        min-height: 44px;
+    }
+    
+    .close-maximize {
+        min-width: 44px;
+        min-height: 44px;
+    }
+    
+    /* Disable hover animations */
+    .trend-card:hover {
+        animation: none;
+    }
+}
+
+/* ===== HIGH DENSITY DISPLAYS ===== */
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+    /* Optimize for high DPI displays */
+    .container {
+        border-width: 1px;
+    }
+    
+    .chart-container,
+    .sidebar,
+    .item,
+    .year-item {
+        border-width: 1px;
+    }
+    
+    /* Sharper shadows for high DPI */
+    .chart-container {
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+    
+    .sidebar {
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+    }
+}
+
+/* ===== ULTRA-WIDE SCREENS (1600px+) ===== */
+@media (min-width: 1600px) {
+    .container {
+        max-width: 2000px;
+    }
+    
+    .dashboard {
+        grid-template-columns: 1fr 500px;
+        gap: var(--spacing-2xl);
+    }
+    
+    .sidebar {
+        padding: var(--spacing-2xl);
+    }
+    
+    .chart-container {
+        padding: var(--spacing-3xl);
+        min-height: 600px;
+    }
+    
+    /* Enhanced spacing for ultra-wide */
+    .controls {
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: var(--spacing-2xl);
+    }
+}
+
+/* ===== PRINT MEDIA OPTIMIZATIONS ===== */
+@media print {
+    /* Hide interactive elements */
+    .controls,
+    .sidebar,
+    .chart-tools,
+    .chart-maximize-overlay,
+    button {
+        display: none !important;
+    }
+    
+    /* Optimize layout for printing */
+    .dashboard {
+        grid-template-columns: 1fr;
+        padding: 0;
+        gap: var(--spacing-base);
+    }
+    
+    .chart-container {
+        break-inside: avoid;
+        box-shadow: none;
+        border: 1px solid #000;
+        padding: var(--spacing-lg);
+    }
+    
+    .header {
+        background: white !important;
+        color: black !important;
+        border-bottom: 2px solid #000;
+        break-after: avoid;
+    }
+    
+    .trend-container {
+        break-inside: avoid;
+        border: 1px solid #000;
+        margin-top: var(--spacing-base);
+    }
+    
+    /* Ensure good contrast for printing */
+    * {
+        color-adjust: exact !important;
+        -webkit-print-color-adjust: exact !important;
+    }
+}
