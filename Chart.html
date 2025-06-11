@@ -4045,1364 +4045,1283 @@
         /* ===========================================
            END OF PART 4: UI MANAGEMENT & EVENT HANDLERS
            =========================================== */
-        /* ===========================================
-           PART 4: UI MANAGEMENT & EVENT HANDLERS
+       /* ===========================================
+           PART 5: CHART CREATION & ADVANCED FEATURES
            =========================================== */
         
-        // ===== DOM MANIPULATION & RENDERING FUNCTIONS =====
+        // ===== MAIN CHART CREATION FUNCTIONS =====
         
         /**
-         * Render the years list in the sidebar with add/remove/toggle controls
-         * Updates the years configuration section with current year data
+         * Create the main stacked bar/column chart with trend lines
+         * Handles all chart configuration, data preparation, and rendering
          */
-        function renderYears() {
-            const container = document.getElementById('yearsList');
-            if (!container) return;
-            
-            container.innerHTML = '';
-            
-            years.forEach((year, index) => {
-                const item = document.createElement('div');
-                item.className = 'year-item fade-in';
-                item.setAttribute('role', 'listitem');
-                item.setAttribute('aria-label', `Year ${year.name} configured as ${year.type}`);
-                
-                item.innerHTML = `
-                    <div style="display: flex; align-items: center; gap: 12px;">
-                        <span style="font-weight: 600; font-size: 16px;">${year.name}</span>
-                        <span class="year-indicator ${year.type === 'previous' ? 'previous-year' : 'current-year'}">
-                            ${year.type === 'previous' ? 'Previous' : 'Current'}
-                        </span>
-                    </div>
-                    <div class="year-controls">
-                        <button onclick="toggleYearType(${index})" 
-                                aria-label="Switch ${year.name} to ${year.type === 'previous' ? 'Current' : 'Previous'} year"
-                                title="Switch year type">
-                            Switch to ${year.type === 'previous' ? 'Current' : 'Previous'}
-                        </button>
-                        ${years.length > 1 ? `
-                            <button class="remove-button" 
-                                    onclick="removeYear(${index})" 
-                                    aria-label="Remove ${year.name}"
-                                    title="Remove this year">
-                                Remove
-                            </button>
-                        ` : ''}
-                    </div>
-                `;
-                container.appendChild(item);
-            });
-            
-            // Update trend line controls after year changes
-            renderTrendLineControls();
-        }
-        
-        /**
-         * Render the categories list with color indicators and remove buttons
-         * Updates the categories section in the sidebar
-         */
-        function renderCategories() {
-            const container = document.getElementById('categoriesList');
-            if (!container) return;
-            
-            container.innerHTML = '';
-            
-            categories.forEach((category, index) => {
-                const item = document.createElement('div');
-                item.className = 'item fade-in';
-                item.setAttribute('role', 'listitem');
-                item.setAttribute('aria-label', `Category ${category.name} with color ${category.color}`);
-                
-                item.innerHTML = `
-                    <div class="item-info">
-                        <div class="item-color" 
-                             style="background-color: ${category.color}" 
-                             aria-label="${category.name} color indicator"
-                             title="Category color: ${category.color}"></div>
-                        <span style="font-weight: 500;">${category.name}</span>
-                    </div>
-                    ${categories.length > 1 ? `
-                        <button class="remove-button" 
-                                onclick="removeCategory(${index})" 
-                                aria-label="Remove ${category.name} category"
-                                title="Remove this category">
-                            Remove
-                        </button>
-                    ` : ''}
-                `;
-                container.appendChild(item);
-            });
-            
-            // Update trend line controls when categories change
-            renderTrendLineControls();
-        }
-        
-        /**
-         * Render the functions list with sorting controls and remove buttons
-         * Updates the functions management section in the sidebar
-         */
-        function renderFunctions() {
-            const container = document.getElementById('functionsList');
-            if (!container) return;
-            
-            container.innerHTML = '';
-            
-            functions.forEach((func, index) => {
-                const item = document.createElement('div');
-                item.className = 'sort-item fade-in';
-                item.setAttribute('role', 'listitem');
-                item.setAttribute('aria-label', `Function ${func.name} at position ${index + 1}`);
-                
-                item.innerHTML = `
-                    <span style="font-weight: 500; flex: 1;">${func.name}</span>
-                    <div style="display: flex; gap: 8px;">
-                        <button onclick="moveFunctionUp(${index})" 
-                                ${index === 0 ? 'disabled' : ''} 
-                                aria-label="Move ${func.name} up"
-                                title="Move up in order">
-                            ↑
-                        </button>
-                        <button onclick="moveFunctionDown(${index})" 
-                                ${index === functions.length - 1 ? 'disabled' : ''} 
-                                aria-label="Move ${func.name} down"
-                                title="Move down in order">
-                            ↓
-                        </button>
-                        ${functions.length > 1 ? `
-                            <button class="remove-button" 
-                                    onclick="removeFunction(${index})" 
-                                    aria-label="Remove ${func.name} function"
-                                    title="Remove this function">
-                                Remove
-                            </button>
-                        ` : ''}
-                    </div>
-                `;
-                container.appendChild(item);
-            });
-        }
-        
-        /**
-         * Render trend line configuration controls for each category
-         * Creates individual controls for color, thickness, opacity, etc.
-         */
-        function renderTrendLineControls() {
-            const container = document.getElementById('trendlineControls');
-            if (!container) return;
-            
-            container.innerHTML = '';
-            
-            // Create header for trend line section
-            const header = document.createElement('div');
-            header.innerHTML = '<h4 style="margin: 0 0 15px 0; color: #333;">Individual Trend Line Settings</h4>';
-            container.appendChild(header);
-            
-            categories.forEach((category, index) => {
-                const config = trendLineConfig[category.id] || {};
-                
-                const categoryDiv = document.createElement('div');
-                categoryDiv.className = 'trendline-category fade-in';
-                categoryDiv.setAttribute('role', 'group');
-                categoryDiv.setAttribute('aria-labelledby', `trendline-${category.id}-title`);
-                
-                categoryDiv.innerHTML = `
-                    <div class="trendline-header">
-                        <div class="trendline-color-indicator" 
-                             style="background-color: ${category.color};"
-                             title="Category color"></div>
-                        <span class="trendline-name" id="trendline-${category.id}-title">${category.name}</span>
-                        <div class="trendline-toggle">
-                            <input type="checkbox" 
-                                   id="trendline-${category.id}-enabled" 
-                                   ${config.enabled ? 'checked' : ''}
-                                   onchange="updateTrendLineConfig('${category.id}', 'enabled', this.checked)"
-                                   aria-label="Enable trend line for ${category.name}">
-                            <label for="trendline-${category.id}-enabled">Enable</label>
-                        </div>
-                    </div>
-                    
-                    <div class="trendline-controls-grid" id="trendline-${category.id}-controls" 
-                         style="display: ${config.enabled ? 'grid' : 'none'};">
-                        
-                        <!-- Color Control -->
-                        <div class="style-control">
-                            <label for="trendline-${category.id}-color">Color:</label>
-                            <input type="color" 
-                                   id="trendline-${category.id}-color" 
-                                   value="${config.color || category.color}"
-                                   onchange="updateTrendLineConfig('${category.id}', 'color', this.value)"
-                                   aria-label="Trend line color for ${category.name}">
-                        </div>
-                        
-                        <!-- Thickness Control -->
-                        <div class="style-control">
-                            <label for="trendline-${category.id}-thickness">
-                                Thickness: <span id="trendline-${category.id}-thickness-value">${config.thickness || 2}px</span>
-                            </label>
-                            <input type="range" 
-                                   id="trendline-${category.id}-thickness" 
-                                   min="1" max="8" value="${config.thickness || 2}"
-                                   oninput="updateTrendLineThickness('${category.id}', this.value)"
-                                   onchange="updateTrendLineConfig('${category.id}', 'thickness', parseInt(this.value))"
-                                   aria-label="Trend line thickness for ${category.name}">
-                        </div>
-                        
-                        <!-- Point Size Control -->
-                        <div class="style-control">
-                            <label for="trendline-${category.id}-pointsize">
-                                Point Size: <span id="trendline-${category.id}-pointsize-value">${config.pointSize || 4}px</span>
-                            </label>
-                            <input type="range" 
-                                   id="trendline-${category.id}-pointsize" 
-                                   min="2" max="10" value="${config.pointSize || 4}"
-                                   oninput="updateTrendLinePointSize('${category.id}', this.value)"
-                                   onchange="updateTrendLineConfig('${category.id}', 'pointSize', parseInt(this.value))"
-                                   aria-label="Trend line point size for ${category.name}">
-                        </div>
-                        
-                        <!-- Opacity Control -->
-                        <div class="style-control">
-                            <label for="trendline-${category.id}-opacity">
-                                Opacity: <span id="trendline-${category.id}-opacity-value">${Math.round((config.opacity || 1) * 100)}%</span>
-                            </label>
-                            <input type="range" 
-                                   id="trendline-${category.id}-opacity" 
-                                   min="10" max="100" value="${Math.round((config.opacity || 1) * 100)}"
-                                   oninput="updateTrendLineOpacity('${category.id}', this.value)"
-                                   onchange="updateTrendLineConfig('${category.id}', 'opacity', this.value / 100)"
-                                   aria-label="Trend line opacity for ${category.name}">
-                        </div>
-                        
-                        <!-- Show Points Toggle -->
-                        <div class="style-control">
-                            <div class="checkbox-item">
-                                <input type="checkbox" 
-                                       id="trendline-${category.id}-points" 
-                                       ${config.showPoints !== false ? 'checked' : ''}
-                                       onchange="updateTrendLineConfig('${category.id}', 'showPoints', this.checked)"
-                                       aria-label="Show points for ${category.name} trend line">
-                                <label for="trendline-${category.id}-points">Show Points</label>
-                            </div>
-                        </div>
-                        
-                        <!-- Show Line Toggle -->
-                        <div class="style-control">
-                            <div class="checkbox-item">
-                                <input type="checkbox" 
-                                       id="trendline-${category.id}-line" 
-                                       ${config.showLine !== false ? 'checked' : ''}
-                                       onchange="updateTrendLineConfig('${category.id}', 'showLine', this.checked)"
-                                       aria-label="Show line for ${category.name} trend line">
-                                <label for="trendline-${category.id}-line">Show Line</label>
-                            </div>
-                        </div>
-                    </div>
-                `;
-                
-                container.appendChild(categoryDiv);
-            });
-        }
-        
-        /**
-         * Render data input forms for all functions with year and category breakdowns
-         * Creates the main data entry interface
-         */
-        function renderDataInput() {
-            const container = document.getElementById('dataInputContainer');
-            if (!container) return;
-            
-            container.innerHTML = '<h3>Function Data Entry</h3>';
-            
-            functions.forEach(func => {
-                const funcDiv = document.createElement('div');
-                funcDiv.className = 'function-input fade-in';
-                funcDiv.setAttribute('role', 'group');
-                funcDiv.setAttribute('aria-labelledby', `${func.id}-title`);
-                
-                // Create category headers
-                let categoryHeaders = '';
-                categories.forEach(category => {
-                    categoryHeaders += `<div class="category-header-item">${category.name}</div>`;
-                });
-                
-                // Create year sections with input fields
-                let yearSections = '';
-                years.forEach(year => {
-                    let categoryInputs = '';
-                    categories.forEach((category, catIndex) => {
-                        const value = getDataValue(func.id, year.id, catIndex);
-                        categoryInputs += `
-                            <input type="number" 
-                                   id="${func.id}-${year.id}-${category.id}" 
-                                   placeholder="${category.name}" 
-                                   value="${value}" 
-                                   min="0" 
-                                   step="1"
-                                   onchange="handleDataInput('${func.id}', '${year.id}', ${catIndex}, this.value)"
-                                   oninput="validateNumericInput(this)"
-                                   aria-label="${category.name} count for ${func.name} in ${year.name}">
-                        `;
-                    });
-                    
-                    yearSections += `
-                        <div class="year-data">
-                            <div class="year-label">${year.name} (${year.type})</div>
-                            <div class="grade-inputs">${categoryInputs}</div>
-                        </div>
-                    `;
-                });
-                
-                funcDiv.innerHTML = `
-                    <h3 id="${func.id}-title">${func.name}</h3>
-                    <div class="category-header">${categoryHeaders}</div>
-                    ${yearSections}
-                `;
-                
-                container.appendChild(funcDiv);
-            });
-        }
-        
-        /**
-         * Update the legend display with current categories and years
-         * Creates simplified legend showing unique categories (not split by year)
-         */
-        function updateLegend() {
-            const container = document.getElementById('legendContainer');
-            if (!container) return;
-            
-            container.innerHTML = '';
-            
-            // Create simplified legend - one entry per category (not per year)
-            categories.forEach((category, index) => {
-                const item = document.createElement('div');
-                item.className = 'legend-item fade-in';
-                item.setAttribute('role', 'listitem');
-                item.setAttribute('tabindex', '0');
-                item.setAttribute('aria-label', `${category.name} category data`);
-                
-                item.innerHTML = `
-                    <div class="legend-color" 
-                         style="background-color: ${category.color};"
-                         title="${category.name} color"></div>
-                    <span>${category.name}</span>
-                `;
-                
-                container.appendChild(item);
-            });
-        }
-        
-        /**
-         * Update trend summary cards with calculated metrics
-         * Shows key performance indicators in card format
-         */
-        function updateTrendSummary() {
-            const container = document.getElementById('trendSummary');
-            if (!container) return;
-            
+        function createMainChart() {
+            const ctx = document.getElementById('qaChart').getContext('2d');
+            const sortedFunctions = getSortedFunctions();
             const prevYear = getPreviousYear();
             const currYear = getCurrentYear();
             
             if (!prevYear || !currYear) {
-                container.innerHTML = '<p>Please configure both previous and current years to see trend analysis.</p>';
+                console.warn('Cannot create chart: Missing year configuration');
                 return;
             }
             
-            // Calculate aggregate metrics across all functions
-            let totalAccountsPrev = 0;
-            let totalAccountsCurr = 0;
-            let totalPassPrev = 0;
-            let totalPassCurr = 0;
-            let totalIssuesPrev = 0;
-            let totalIssuesCurr = 0;
+            // Generate dynamic labels with spacing controls
+            const labels = generateChartLabels(sortedFunctions);
             
-            functions.forEach(func => {
-                const accountsPrev = getFunctionYearTotal(func.id, prevYear.id);
-                const accountsCurr = getFunctionYearTotal(func.id, currYear.id);
-                const passPrev = getDataValue(func.id, prevYear.id, 0); // First category is typically "Pass"
-                const passCurr = getDataValue(func.id, currYear.id, 0);
-                const issuesPrev = getDataValue(func.id, prevYear.id, categories.length - 1); // Last category is typically "Issues"
-                const issuesCurr = getDataValue(func.id, currYear.id, categories.length - 1);
-                
-                totalAccountsPrev += accountsPrev;
-                totalAccountsCurr += accountsCurr;
-                totalPassPrev += passPrev;
-                totalPassCurr += passCurr;
-                totalIssuesPrev += issuesPrev;
-                totalIssuesCurr += issuesCurr;
-            });
+            // Get display options from UI controls
+            const showDataLabels = document.getElementById('showDataLabels')?.checked || false;
+            const showValues = document.getElementById('showValues')?.checked || false;
+            const showPercentages = document.getElementById('showPercentages')?.checked || false;
+            const showTrendLine = document.getElementById('showTrendLine')?.checked || false;
+            const chartType = document.getElementById('chartType')?.value || 'bar';
+            const animation = document.getElementById('animation')?.value === 'true';
             
-            // Calculate rates and changes
-            const passRatePrev = totalAccountsPrev > 0 ? (totalPassPrev / totalAccountsPrev) * 100 : 0;
-            const passRateCurr = totalAccountsCurr > 0 ? (totalPassCurr / totalAccountsCurr) * 100 : 0;
-            const issueRatePrev = totalAccountsPrev > 0 ? (totalIssuesPrev / totalAccountsPrev) * 100 : 0;
-            const issueRateCurr = totalAccountsCurr > 0 ? (totalIssuesCurr / totalAccountsCurr) * 100 : 0;
-            
-            const passRateChange = passRateCurr - passRatePrev;
-            const issueRateChange = issueRateCurr - issueRatePrev;
-            const volumeChange = totalAccountsCurr - totalAccountsPrev;
-            
-            // Create summary cards
-            const cards = [
-                {
-                    title: `Overall Pass Rate ${currYear.name}`,
-                    value: `${passRateCurr.toFixed(1)}%`,
-                    change: `${passRateChange >= 0 ? '+' : ''}${passRateChange.toFixed(1)}pp vs ${prevYear.name}`
-                },
-                {
-                    title: `Issue Rate ${currYear.name}`,
-                    value: `${issueRateCurr.toFixed(1)}%`,
-                    change: `${issueRateChange >= 0 ? '+' : ''}${issueRateChange.toFixed(1)}pp vs ${prevYear.name}`
-                },
-                {
-                    title: `Total Reviews ${currYear.name}`,
-                    value: totalAccountsCurr.toString(),
-                    change: `${volumeChange >= 0 ? '+' : ''}${volumeChange} vs ${prevYear.name}`
-                },
-                {
-                    title: 'Best Performing',
-                    value: getBestPerformingFunction(),
-                    change: `Highest ${currYear.name} pass rate`
-                }
-            ];
-            
-            container.innerHTML = '';
-            cards.forEach((card, index) => {
-                const cardEl = document.createElement('div');
-                cardEl.className = 'trend-card fade-in';
-                cardEl.style.animationDelay = `${index * 0.1}s`;
-                cardEl.setAttribute('role', 'listitem');
-                cardEl.setAttribute('tabindex', '0');
-                cardEl.setAttribute('aria-label', `${card.title}: ${card.value}, ${card.change}`);
-                
-                cardEl.innerHTML = `
-                    <h4>${card.title}</h4>
-                    <div class="value">${card.value}</div>
-                    <div class="change">${card.change}</div>
-                `;
-                container.appendChild(cardEl);
-            });
-        }
-        
-        /**
-         * Get the best performing function based on current year pass rate
-         * @returns {string} Name of the best performing function
-         */
-        function getBestPerformingFunction() {
-            const currYear = getCurrentYear();
-            if (!currYear) return 'N/A';
-            
-            let bestFunction = '';
-            let bestRate = 0;
-            
-            functions.forEach(func => {
-                const passRate = getCategoryPercentage(func.id, currYear.id, 0); // First category is typically "Pass"
-                
-                if (passRate > bestRate) {
-                    bestRate = passRate;
-                    bestFunction = func.name;
-                }
-            });
-            
-            return bestFunction || 'N/A';
-        }
-        
-        // ===== EVENT HANDLERS FOR DATA MANIPULATION =====
-        
-        /**
-         * Handle data input changes from form fields
-         * @param {string} functionId - Function identifier
-         * @param {string} yearId - Year identifier
-         * @param {number} categoryIndex - Category index
-         * @param {string} value - Input value from form field
-         */
-        function handleDataInput(functionId, yearId, categoryIndex, value) {
-            const numValue = parseInt(value) || 0;
-            setDataValue(functionId, yearId, categoryIndex, numValue);
-            
-            // Update charts after data change
-            setTimeout(() => {
-                createCharts();
-                announceChange(`Updated ${getCategoryById(categories[categoryIndex].id)?.name || 'data'} for ${getFunctionById(functionId)?.name || 'function'}`);
-            }, 100);
-        }
-        
-        /**
-         * Validate numeric input fields to ensure only positive integers
-         * @param {HTMLInputElement} input - Input element to validate
-         */
-        function validateNumericInput(input) {
-            let value = input.value;
-            
-            // Remove any non-numeric characters except decimal point
-            value = value.replace(/[^\d]/g, '');
-            
-            // Ensure value is not negative
-            if (parseInt(value) < 0) {
-                value = '0';
-            }
-            
-            input.value = value;
-        }
-        
-        /**
-         * Add a new year to the configuration
-         */
-        function addYear() {
-            const nameInput = document.getElementById('newYearName');
-            const typeSelect = document.getElementById('yearType');
-            
-            if (!nameInput || !typeSelect) return;
-            
-            const name = nameInput.value.trim();
-            const type = typeSelect.value;
-            
-            if (!name) {
-                announceChange('Please enter a year name');
-                nameInput.focus();
-                return;
-            }
-            
-            // Check for duplicate year names
-            if (years.some(y => y.name === name)) {
-                announceChange('Year name already exists');
-                nameInput.focus();
-                return;
-            }
-            
-            // If adding a year of existing type, change the existing one to the opposite type
-            const existingType = years.find(y => y.type === type);
-            if (existingType) {
-                existingType.type = type === 'previous' ? 'current' : 'previous';
-            }
-            
-            // Create new year with unique ID
-            const id = 'y' + name.replace(/\s+/g, '');
-            const newYear = { name, type, id };
-            years.push(newYear);
-            
-            // Initialize data for new year across all functions
-            functions.forEach(func => {
-                if (!functionData[func.id]) functionData[func.id] = {};
-                functionData[func.id][id] = new Array(categories.length).fill(0);
-            });
-            
-            // Clear input and update UI
-            nameInput.value = '';
-            renderYears();
-            renderDataInput();
-            createCharts();
-            announceChange(`Added ${name} as ${type} year`);
-        }
-        
-        /**
-         * Remove a year from the configuration
-         * @param {number} index - Index of year to remove
-         */
-        function removeYear(index) {
-            if (years.length <= 1) {
-                announceChange('Cannot remove the last year');
-                return;
-            }
-            
-            const year = years[index];
-            
-            // Remove data for this year from all functions
-            functions.forEach(func => {
-                if (functionData[func.id]) {
-                    delete functionData[func.id][year.id];
-                }
-            });
-            
-            // Remove year from array
-            years.splice(index, 1);
-            
-            renderYears();
-            renderDataInput();
-            createCharts();
-            announceChange(`Removed ${year.name}`);
-        }
-        
-        /**
-         * Toggle year type between previous and current
-         * @param {number} index - Index of year to toggle
-         */
-        function toggleYearType(index) {
-            const year = years[index];
-            const newType = year.type === 'previous' ? 'current' : 'previous';
-            
-            // If changing to a type that already exists, swap them
-            const existingTypeIndex = years.findIndex(y => y.type === newType);
-            if (existingTypeIndex !== -1 && existingTypeIndex !== index) {
-                years[existingTypeIndex].type = year.type;
-            }
-            
-            year.type = newType;
-            
-            renderYears();
-            renderDataInput();
-            createCharts();
-            announceChange(`Changed ${year.name} to ${newType} year`);
-        }
-        
-        /**
-         * Add a new category to the configuration
-         */
-        function addCategory() {
-            const nameInput = document.getElementById('newCategoryName');
-            const colorInput = document.getElementById('newCategoryColor');
-            
-            if (!nameInput || !colorInput) return;
-            
-            const name = nameInput.value.trim();
-            const color = colorInput.value;
-            
-            if (!name) {
-                announceChange('Please enter a category name');
-                nameInput.focus();
-                return;
-            }
-            
-            // Check for duplicate category names
-            if (categories.some(c => c.name === name)) {
-                announceChange('Category name already exists');
-                nameInput.focus();
-                return;
-            }
-            
-            // Create new category with unique ID
-            const id = name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-            const newCategory = { name, color, id };
-            categories.push(newCategory);
-            
-            // Add new category data to all functions and years
-            functions.forEach(func => {
-                years.forEach(year => {
-                    if (!functionData[func.id]) functionData[func.id] = {};
-                    if (!functionData[func.id][year.id]) functionData[func.id][year.id] = [];
-                    functionData[func.id][year.id].push(0);
-                });
-            });
-            
-            // Initialize trend line configuration for new category
-            trendLineConfig[id] = {
-                enabled: true,
-                color: color,
-                thickness: 2,
-                pointSize: 4,
-                opacity: 1.0,
-                showPoints: true,
-                showLine: true,
-                complementaryColor: darkenColor(color, 20)
-            };
-            
-            // Clear input and update UI
-            nameInput.value = '';
-            colorInput.value = '#2196F3';
-            renderCategories();
-            renderDataInput();
-            renderTrendLineControls();
-            createCharts();
-            announceChange(`Added ${name} category`);
-        }
-        
-        /**
-         * Remove a category from the configuration
-         * @param {number} index - Index of category to remove
-         */
-        function removeCategory(index) {
-            if (categories.length <= 1) {
-                announceChange('Cannot remove the last category');
-                return;
-            }
-            
-            const category = categories[index];
-            
-            // Remove category data from all functions and years
-            functions.forEach(func => {
-                years.forEach(year => {
-                    if (functionData[func.id] && functionData[func.id][year.id]) {
-                        functionData[func.id][year.id].splice(index, 1);
-                    }
-                });
-            });
-            
-            // Remove trend line configuration
-            delete trendLineConfig[category.id];
-            
-            // Remove category from array
-            categories.splice(index, 1);
-            
-            renderCategories();
-            renderDataInput();
-            renderTrendLineControls();
-            createCharts();
-            announceChange(`Removed ${category.name} category`);
-        }
-        
-        /**
-         * Add a new function to the configuration
-         */
-        function addFunction() {
-            const nameInput = document.getElementById('newFunctionName');
-            
-            if (!nameInput) return;
-            
-            const name = nameInput.value.trim();
-            
-            if (!name) {
-                announceChange('Please enter a function name');
-                nameInput.focus();
-                return;
-            }
-            
-            // Check for duplicate function names
-            if (functions.some(f => f.name === name)) {
-                announceChange('Function name already exists');
-                nameInput.focus();
-                return;
-            }
-            
-            // Create new function with unique ID
-            const id = name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-            const newFunction = { name, id };
-            functions.push(newFunction);
-            
-            // Initialize data for new function across all years
-            functionData[id] = {};
-            years.forEach(year => {
-                functionData[id][year.id] = new Array(categories.length).fill(0);
-            });
-            
-            // Clear input and update UI
-            nameInput.value = '';
-            renderFunctions();
-            renderDataInput();
-            createCharts();
-            announceChange(`Added ${name} function`);
-        }
-        
-        /**
-         * Remove a function from the configuration
-         * @param {number} index - Index of function to remove
-         */
-        function removeFunction(index) {
-            if (functions.length <= 1) {
-                announceChange('Cannot remove the last function');
-                return;
-            }
-            
-            const func = functions[index];
-            
-            // Remove function data
-            delete functionData[func.id];
-            
-            // Remove function from array
-            functions.splice(index, 1);
-            
-            renderFunctions();
-            renderDataInput();
-            createCharts();
-            announceChange(`Removed ${func.name} function`);
-        }
-        
-        /**
-         * Move function up in the order
-         * @param {number} index - Current index of function
-         */
-        function moveFunctionUp(index) {
-            if (index > 0) {
-                [functions[index], functions[index - 1]] = [functions[index - 1], functions[index]];
-                renderFunctions();
-                createCharts();
-                announceChange(`Moved ${functions[index - 1].name} up`);
-            }
-        }
-        
-        /**
-         * Move function down in the order
-         * @param {number} index - Current index of function
-         */
-        function moveFunctionDown(index) {
-            if (index < functions.length - 1) {
-                [functions[index], functions[index + 1]] = [functions[index + 1], functions[index]];
-                renderFunctions();
-                createCharts();
-                announceChange(`Moved ${functions[index + 1].name} down`);
-            }
-        }
-        
-        // ===== TEXT STYLING EVENT HANDLERS =====
-        
-         * Update text style configuration and refresh charts
-         * @param {string} element - Text element type (dataLabels, axisLabels, etc.)
-         * @param {string} property - Style property (fontSize, color, fontWeight)
-         * @param {*} value - New value for the property
-         */
-        function updateTextStyle(element, property, value) {
-            if (!textStyles[element]) {
-                textStyles[element] = {};
-            }
-            
-            textStyles[element][property] = value;
-            
-            // Update display values for range sliders
-            updateTextStyleDisplays();
-            
-            // Recreate charts with new styling
-            createCharts();
-        }
-        
-        /**
-         * Update display values for text style range sliders
-         */
-        function updateTextStyleDisplays() {
-            // Data Labels
-            const dataLabelSizeEl = document.getElementById('dataLabelFontSizeValue');
-            if (dataLabelSizeEl) {
-                dataLabelSizeEl.textContent = textStyles.dataLabels.fontSize + 'px';
-            }
-            
-            // Axis Labels
-            const axisLabelSizeEl = document.getElementById('axisLabelFontSizeValue');
-            if (axisLabelSizeEl) {
-                axisLabelSizeEl.textContent = textStyles.axisLabels.fontSize + 'px';
-            }
-            
-            // Function Names
-            const functionNameSizeEl = document.getElementById('functionNameFontSizeValue');
-            if (functionNameSizeEl) {
-                functionNameSizeEl.textContent = textStyles.functionNames.fontSize + 'px';
-            }
-        }
-        
-        // ===== TREND LINE CONFIGURATION HANDLERS =====
-        
-        /**
-         * Update trend line configuration for a specific category
-         * @param {string} categoryId - Category identifier
-         * @param {string} property - Property to update
-         * @param {*} value - New value
-         */
-        function updateTrendLineConfig(categoryId, property, value) {
-            if (!trendLineConfig[categoryId]) {
-                trendLineConfig[categoryId] = {};
-            }
-            
-            trendLineConfig[categoryId][property] = value;
-            
-            // Toggle controls visibility when enabled/disabled
-            if (property === 'enabled') {
-                const controlsEl = document.getElementById(`trendline-${categoryId}-controls`);
-                if (controlsEl) {
-                    controlsEl.style.display = value ? 'grid' : 'none';
-                }
-            }
-            
-            // Recreate charts with new trend line configuration
-            createCharts();
-        }
-        
-        /**
-         * Update trend line thickness display and configuration
-         * @param {string} categoryId - Category identifier
-         * @param {string} value - Thickness value
-         */
-        function updateTrendLineThickness(categoryId, value) {
-            const displayEl = document.getElementById(`trendline-${categoryId}-thickness-value`);
-            if (displayEl) {
-                displayEl.textContent = value + 'px';
-            }
-        }
-        
-        /**
-         * Update trend line point size display and configuration
-         * @param {string} categoryId - Category identifier
-         * @param {string} value - Point size value
-         */
-        function updateTrendLinePointSize(categoryId, value) {
-            const displayEl = document.getElementById(`trendline-${categoryId}-pointsize-value`);
-            if (displayEl) {
-                displayEl.textContent = value + 'px';
-            }
-        }
-        
-        /**
-         * Update trend line opacity display and configuration
-         * @param {string} categoryId - Category identifier
-         * @param {string} value - Opacity value (0-100)
-         */
-        function updateTrendLineOpacity(categoryId, value) {
-            const displayEl = document.getElementById(`trendline-${categoryId}-opacity-value`);
-            if (displayEl) {
-                displayEl.textContent = value + '%';
-            }
-        }
-        
-        // ===== CHART MAXIMIZATION HANDLERS =====
-        
-        /**
-         * Toggle chart between normal and maximized view
-         */
-        function toggleChartMaximize() {
-            const overlay = document.getElementById('chartMaximizeOverlay');
-            const button = document.getElementById('maximizeChart');
-            
-            if (!overlay || !button) return;
-            
-            isChartMaximized = !isChartMaximized;
-            
-            if (isChartMaximized) {
-                // Show maximized view
-                overlay.style.display = 'block';
-                button.textContent = 'Minimize Chart';
-                button.setAttribute('aria-label', 'Minimize chart to normal view');
-                
-                // Create maximized chart
-                setTimeout(() => {
-                    createMaximizedChart();
-                }, 100);
-                
-                // Trap focus within overlay
-                trapFocus(overlay);
-                
-                announceChange('Chart maximized to full screen');
-            } else {
-                // Hide maximized view
-                overlay.style.display = 'none';
-                button.textContent = 'Maximize Chart';
-                button.setAttribute('aria-label', 'Expand chart to full viewport size');
-                
-                // Destroy maximized chart
-                if (maximizedChart) {
-                    maximizedChart.destroy();
-                    maximizedChart = null;
-                }
-                
-                announceChange('Chart minimized to normal view');
-            }
-        }
-        
-        /**
-         * Trap focus within a container element
-         * @param {HTMLElement} container - Container to trap focus within
-         */
-        function trapFocus(container) {
-            const focusableElements = container.querySelectorAll(
-                'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+            // Generate datasets for bars and trend lines
+            const datasets = generateChartDatasets(
+                sortedFunctions, 
+                labels, 
+                showDataLabels, 
+                showValues, 
+                showPercentages, 
+                showTrendLine
             );
             
-            const firstElement = focusableElements[0];
-            const lastElement = focusableElements[focusableElements.length - 1];
+            // Create chart configuration
+            const config = {
+                type: chartType,
+                data: { labels, datasets },
+                options: createMainChartOptions(chartType, animation, showTrendLine, prevYear, currYear),
+                plugins: [createFunctionNamePlugin(sortedFunctions, labels)]
+            };
             
-            if (firstElement) firstElement.focus();
-            
-            container.addEventListener('keydown', function(e) {
-                if (e.key === 'Tab') {
-                    if (e.shiftKey) {
-                        if (document.activeElement === firstElement) {
-                            e.preventDefault();
-                            lastElement.focus();
-                        }
-                    } else {
-                        if (document.activeElement === lastElement) {
-                            e.preventDefault();
-                            firstElement.focus();
-                        }
-                    }
-                }
-                
-                if (e.key === 'Escape') {
-                    toggleChartMaximize();
-                }
-            });
-        }
-        
-        // ===== EXPORT FUNCTIONALITY =====
-        
-        /**
-         * Export current chart as image and store in memory
-         */
-        function exportChartImage() {
-            const canvas = document.getElementById('qaChart');
-            if (!canvas || !chart) {
-                announceChange('No chart available to export');
-                return;
+            // Destroy existing chart and create new one
+            if (chart) {
+                chart.destroy();
             }
+            chart = new Chart(ctx, config);
             
-            try {
-                // Create high-quality image data
-                const imageData = canvas.toDataURL('image/png', 1.0);
-                
-                // Generate unique filename
-                const timestamp = new Date().toISOString().slice(0, 19).replace(/[:-]/g, '');
-                const filename = `chart_export_${exportCounter}_${timestamp}.png`;
-                
-                // Store in memory
-                const exportedImage = {
-                    id: exportCounter,
-                    filename: filename,
-                    dataUrl: imageData,
-                    timestamp: new Date(),
-                    chartType: document.getElementById('chartType')?.value || 'bar',
-                    functionsCount: functions.length,
-                    categoriesCount: categories.length
-                };
-                
-                exportedImages.push(exportedImage);
-                exportCounter++;
-                
-                // Create a temporary download element to show the image was captured
-                createImagePreview(exportedImage);
-                
-                announceChange(`Chart exported as ${filename} and stored in memory`);
-                
-            } catch (error) {
-                console.error('Export failed:', error);
-                announceChange('Failed to export chart. Please try again.');
-            }
+            // Update supporting elements
+            updateLegend();
+            updateChartAccessibility();
         }
         
         /**
-         * Create a preview of the exported image
-         * @param {Object} exportedImage - Exported image data
+         * Generate chart labels with proper spacing
+         * @param {Array} sortedFunctions - Array of sorted function objects
+         * @returns {Array} Array of labels with spacing
          */
-        function createImagePreview(exportedImage) {
-            const storageContainer = document.getElementById('imageStorage');
-            if (!storageContainer) return;
-            
-            const preview = document.createElement('div');
-            preview.className = 'image-preview fade-in';
-            preview.style.cssText = `
-                position: fixed;
-                top: 20px;
-                right: 20px;
-                background: white;
-                border: 2px solid #667eea;
-                border-radius: 8px;
-                padding: 15px;
-                box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-                z-index: 1000;
-                max-width: 300px;
-            `;
-            
-            preview.innerHTML = `
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                    <strong>Image Exported</strong>
-                    <button onclick="this.parentElement.parentElement.remove()" 
-                            style="background: #f44336; color: white; border: none; border-radius: 4px; padding: 4px 8px; cursor: pointer;"
-                            aria-label="Close preview">×</button>
-                </div>
-                <img src="${exportedImage.dataUrl}" 
-                     style="width: 100%; height: auto; border-radius: 4px; margin-bottom: 10px;"
-                     alt="Exported chart preview">
-                <div style="font-size: 12px; color: #666;">
-                    <div>Filename: ${exportedImage.filename}</div>
-                    <div>Stored in memory (ID: ${exportedImage.id})</div>
-                </div>
-            `;
-            
-            document.body.appendChild(preview);
-            
-            // Auto-remove after 5 seconds
-            setTimeout(() => {
-                if (preview.parentElement) {
-                    preview.remove();
-                }
-            }, 5000);
-        }
-        
-        // ===== UTILITY FUNCTIONS =====
-        
-        /**
-         * Update shading preview boxes when opacity settings change
-         */
-        function updateShadingPreview() {
-            const prevPreview = document.getElementById('prevPreview');
-            const currPreview = document.getElementById('currPreview');
-            
-            if (prevPreview && currPreview) {
-                const prevOpacity = getOpacity('previous');
-                const currOpacity = getOpacity('current');
-                
-                // Use first category color for preview
-                const baseColor = categories[0]?.color || '#4CAF50';
-                
-                prevPreview.style.backgroundColor = baseColor + prevOpacity;
-                currPreview.style.backgroundColor = baseColor + currOpacity;
-            }
-        }
-        
-        /**
-         * Update chart spacing and recreate charts
-         */
-        function updateSpacing() {
-            const columnSpacingEl = document.getElementById('columnSpacing');
-            const categoryGapEl = document.getElementById('categoryGap');
-            
-            if (columnSpacingEl) {
-                columnSpacing = parseInt(columnSpacingEl.value);
-                document.getElementById('columnSpacingValue').textContent = columnSpacing;
-            }
-            
-            if (categoryGapEl) {
-                categoryGap = parseInt(categoryGapEl.value);
-                document.getElementById('categoryGapValue').textContent = categoryGap;
-            }
-            
-            createCharts();
-        }
-        
-        /**
-         * Toggle data label options visibility
-         */
-        function toggleDataLabelOptions() {
-            const showDataLabels = document.getElementById('showDataLabels')?.checked || false;
-            const options = document.getElementById('dataLabelOptions');
-            
-            if (options) {
-                options.style.display = showDataLabels ? 'grid' : 'none';
-                options.setAttribute('aria-hidden', showDataLabels ? 'false' : 'true');
-            }
-        }
-        
-        /**
-         * Announce changes to screen readers
-         * @param {string} message - Message to announce
-         */
-        function announceChange(message) {
-            const announcement = document.getElementById('announcement');
-            if (announcement) {
-                announcement.textContent = message;
-                
-                // Clear after a delay to allow for multiple announcements
-                setTimeout(() => {
-                    announcement.textContent = '';
-                }, 1000);
-            }
-        }
-        
-        /**
-         * Get sorted functions based on current sort settings
-         * @returns {Array} Sorted array of functions
-         */
-        function getSortedFunctions() {
-            const sortBy = document.getElementById('sortBy')?.value || 'default';
-            const sortDirection = document.getElementById('sortDirection')?.value || 'asc';
-            
-            let sortedFunctions = [...functions];
+        function generateChartLabels(sortedFunctions) {
+            const labels = [];
             const prevYear = getPreviousYear();
             const currYear = getCurrentYear();
             
-            if (!prevYear || !currYear) return sortedFunctions;
-            
-            switch (sortBy) {
-                case 'name':
-                    sortedFunctions.sort((a, b) => a.name.localeCompare(b.name));
-                    break;
-                    
-                case 'totalPrevious':
-                    sortedFunctions.sort((a, b) => {
-                        const totalA = getFunctionYearTotal(a.id, prevYear.id);
-                        const totalB = getFunctionYearTotal(b.id, prevYear.id);
-                        return totalA - totalB;
-                    });
-                    break;
-                    
-                case 'totalCurrent':
-                    sortedFunctions.sort((a, b) => {
-                        const totalA = getFunctionYearTotal(a.id, currYear.id);
-                        const totalB = getFunctionYearTotal(b.id, currYear.id);
-                        return totalA - totalB;
-                    });
-                    break;
-                    
-                case 'improvement':
-                    sortedFunctions.sort((a, b) => {
-                        const improvementA = getYearOverYearChange(a.id, 0); // Use first category for improvement
-                        const improvementB = getYearOverYearChange(b.id, 0);
-                        return improvementA - improvementB;
-                    });
-                    break;
-                    
-                case 'passRateCurrent':
-                    sortedFunctions.sort((a, b) => {
-                        const passRateA = getCategoryPercentage(a.id, currYear.id, 0);
-                        const passRateB = getCategoryPercentage(b.id, currYear.id, 0);
-                        return passRateA - passRateB;
-                    });
-                    break;
-                    
-                default:
-                    // Keep original order
-                    break;
-            }
-            
-            if (sortDirection === 'desc') {
-                sortedFunctions.reverse();
-            }
-            
-            return sortedFunctions;
-        }
-        
-        // ===== EVENT LISTENER SETUP =====
-        
-        /**
-         * Initialize all event listeners for the application
-         */
-        function initializeEventListeners() {
-            // Text styling controls
-            document.addEventListener('input', function(e) {
-                // Data label font size
-                if (e.target.id === 'dataLabelFontSize') {
-                    updateTextStyle('dataLabels', 'fontSize', parseInt(e.target.value));
+            sortedFunctions.forEach((func, funcIndex) => {
+                // Add previous year label
+                labels.push(prevYear.name);
+                
+                // Add column spacing between years within same function
+                for (let i = 0; i < columnSpacing; i++) {
+                    labels.push('');
                 }
-                // Axis label font size
-                else if (e.target.id === 'axisLabelFontSize') {
-                    updateTextStyle('axisLabels', 'fontSize', parseInt(e.target.value));
-                }
-                // Function name font size
-                else if (e.target.id === 'functionNameFontSize') {
-                    updateTextStyle('functionNames', 'fontSize', parseInt(e.target.value));
-                }
-                // Opacity controls
-                else if (e.target.id === 'prevOpacity' || e.target.id === 'currOpacity') {
-                    const isPrevoius = e.target.id === 'prevOpacity';
-                    const valueEl = document.getElementById(isPrevoius ? 'prevOpacityValue' : 'currOpacityValue');
-                    if (valueEl) valueEl.textContent = e.target.value + '%';
-                    updateShadingPreview();
-                }
-                // Chart spacing controls
-                else if (e.target.id === 'columnSpacing' || e.target.id === 'categoryGap') {
-                    updateSpacing();
-                }
-                // Data input fields
-                else if (e.target.type === 'number' && e.target.id.includes('-')) {
-                    // Real-time validation for numeric inputs
-                    validateNumericInput(e.target);
-                }
-            });
-            
-            // Color and select changes
-            document.addEventListener('change', function(e) {
-                // Text styling colors
-                if (e.target.id === 'dataLabelColor') {
-                    updateTextStyle('dataLabels', 'color', e.target.value);
-                }
-                else if (e.target.id === 'axisLabelColor') {
-                    updateTextStyle('axisLabels', 'color', e.target.value);
-                }
-                else if (e.target.id === 'functionNameColor') {
-                    updateTextStyle('functionNames', 'color', e.target.value);
-                }
-                // Text styling weights
-                else if (e.target.id === 'dataLabelWeight') {
-                    updateTextStyle('dataLabels', 'fontWeight', e.target.value);
-                }
-                else if (e.target.id === 'functionNameWeight') {
-                    updateTextStyle('functionNames', 'fontWeight', e.target.value);
-                }
-                // Chart controls
-                else if (['chartType', 'animation', 'sortBy', 'sortDirection'].includes(e.target.id)) {
-                    createCharts();
-                }
-                // Data label checkboxes
-                else if (['showDataLabels', 'showValues', 'showPercentages', 'showTrendLine'].includes(e.target.id)) {
-                    if (e.target.id === 'showDataLabels') {
-                        toggleDataLabelOptions();
-                    }
-                    createCharts();
-                }
-                // Shading controls
-                else if (e.target.name === 'shading') {
-                    const manualControls = document.getElementById('manualOpacityControls');
-                    if (manualControls) {
-                        manualControls.style.display = e.target.value === 'manual' ? 'block' : 'none';
-                    }
-                    updateShadingPreview();
-                    createCharts();
-                }
-                // Opacity changes
-                else if (e.target.id === 'prevOpacity' || e.target.id === 'currOpacity') {
-                    updateShadingPreview();
-                    createCharts();
-                }
-            });
-            
-            // Keyboard shortcuts
-            document.addEventListener('keydown', function(e) {
-                // Enter key for adding items
-                if (e.key === 'Enter') {
-                    if (e.target.id === 'newCategoryName') {
-                        addCategory();
-                    } else if (e.target.id === 'newFunctionName') {
-                        addFunction();
-                    } else if (e.target.id === 'newYearName') {
-                        addYear();
+                
+                // Add current year label
+                labels.push(currYear.name);
+                
+                // Add category gap between different functions (except last one)
+                if (funcIndex < sortedFunctions.length - 1) {
+                    for (let i = 0; i < categoryGap; i++) {
+                        labels.push('');
                     }
                 }
-                // Escape key to close maximized view
-                else if (e.key === 'Escape' && isChartMaximized) {
-                    toggleChartMaximize();
-                }
-                // Ctrl+E for export
-                else if (e.ctrlKey && e.key === 'e') {
-                    e.preventDefault();
-                    exportChartImage();
-                }
-                // Ctrl+M for maximize/minimize
-                else if (e.ctrlKey && e.key === 'm') {
-                    e.preventDefault();
-                    toggleChartMaximize();
-                }
             });
             
-            // Focus management for accessibility
-            document.addEventListener('focusin', function(e) {
-                if (e.target.matches('.function-input')) {
-                    e.target.style.borderColor = '#667eea';
-                }
-            });
-            
-            document.addEventListener('focusout', function(e) {
-                if (e.target.matches('.function-input')) {
-                    e.target.style.borderColor = 'transparent';
-                }
-            });
-            
-            // Window resize handling for responsive behavior
-            window.addEventListener('resize', debounce(function() {
-                if (chart) {
-                    chart.resize();
-                }
-                if (trendChart) {
-                    trendChart.resize();
-                }
-                if (maximizedChart) {
-                    maximizedChart.resize();
-                }
-            }, 250));
+            return labels;
         }
         
         /**
-         * Debounce function to limit how often a function can be called
-         * @param {Function} func - Function to debounce
-         * @param {number} wait - Wait time in milliseconds
-         * @returns {Function} Debounced function
+         * Generate all datasets for the main chart (bars + trend lines)
+         * @param {Array} sortedFunctions - Sorted functions array
+         * @param {Array} labels - Chart labels array
+         * @param {boolean} showDataLabels - Whether to show data labels
+         * @param {boolean} showValues - Whether to show values
+         * @param {boolean} showPercentages - Whether to show percentages
+         * @param {boolean} showTrendLine - Whether to show trend lines
+         * @returns {Array} Array of Chart.js datasets
          */
-        function debounce(func, wait) {
-            let timeout;
-            return function executedFunction(...args) {
-                const later = () => {
-                    clearTimeout(timeout);
-                    func(...args);
-                };
-                clearTimeout(timeout);
-                timeout = setTimeout(later, wait);
+        function generateChartDatasets(sortedFunctions, labels, showDataLabels, showValues, showPercentages, showTrendLine) {
+            const datasets = [];
+            const prevYear = getPreviousYear();
+            const currYear = getCurrentYear();
+            
+            // Generate bar datasets for each category
+            categories.forEach((category, catIndex) => {
+                const { dataPrev, dataCurr, trendDataPrev, trendDataCurr } = 
+                    generateCategoryData(sortedFunctions, category, catIndex, labels.length);
+                
+                // Previous year bars
+                datasets.push(createBarDataset(
+                    category, 
+                    prevYear, 
+                    dataPrev, 
+                    'previous', 
+                    showDataLabels && showValues
+                ));
+                
+                // Current year bars
+                datasets.push(createBarDataset(
+                    category, 
+                    currYear, 
+                    dataCurr, 
+                    'current', 
+                    showDataLabels && showValues
+                ));
+                
+                // Trend lines (if enabled)
+                if (showTrendLine && trendLineConfig[category.id]?.enabled) {
+                    datasets.push(createTrendDataset(
+                        category, 
+                        prevYear, 
+                        trendDataPrev, 
+                        showDataLabels && showPercentages
+                    ));
+                    
+                    datasets.push(createTrendDataset(
+                        category, 
+                        currYear, 
+                        trendDataCurr, 
+                        showDataLabels && showPercentages
+                    ));
+                }
+            });
+            
+            return datasets;
+        }
+        
+        /**
+         * Generate data arrays for a specific category
+         * @param {Array} sortedFunctions - Sorted functions
+         * @param {Object} category - Category object
+         * @param {number} catIndex - Category index
+         * @param {number} totalLength - Total length of data array needed
+         * @returns {Object} Object with data arrays for previous/current years
+         */
+        function generateCategoryData(sortedFunctions, category, catIndex, totalLength) {
+            const dataPrev = new Array(totalLength).fill(null);
+            const dataCurr = new Array(totalLength).fill(null);
+            const trendDataPrev = new Array(totalLength).fill(null);
+            const trendDataCurr = new Array(totalLength).fill(null);
+            
+            const prevYear = getPreviousYear();
+            const currYear = getCurrentYear();
+            
+            let dataIndex = 0;
+            
+            sortedFunctions.forEach((func, funcIndex) => {
+                // Get raw values
+                const valuePrev = getDataValue(func.id, prevYear.id, catIndex);
+                const valueCurr = getDataValue(func.id, currYear.id, catIndex);
+                
+                // Calculate percentages with 2 decimal precision
+                const percPrev = getCategoryPercentage(func.id, prevYear.id, catIndex);
+                const percCurr = getCategoryPercentage(func.id, currYear.id, catIndex);
+                
+                // Previous year data
+                dataPrev[dataIndex] = valuePrev;
+                trendDataPrev[dataIndex] = percPrev;
+                
+                // Skip column spacing
+                dataIndex += columnSpacing + 1;
+                
+                // Current year data
+                dataCurr[dataIndex] = valueCurr;
+                trendDataCurr[dataIndex] = percCurr;
+                
+                // Move to next function group
+                dataIndex += 1;
+                
+                // Add category gap (except for last function)
+                if (funcIndex < sortedFunctions.length - 1) {
+                    dataIndex += categoryGap;
+                }
+            });
+            
+            return { dataPrev, dataCurr, trendDataPrev, trendDataCurr };
+        }
+        
+        /**
+         * Create a bar dataset configuration
+         * @param {Object} category - Category object
+         * @param {Object} year - Year object
+         * @param {Array} data - Data array
+         * @param {string} yearType - 'previous' or 'current'
+         * @param {boolean} showLabels - Whether to show data labels
+         * @returns {Object} Chart.js dataset configuration
+         */
+        function createBarDataset(category, year, data, yearType, showLabels) {
+            const opacity = getOpacity(yearType);
+            
+            return {
+                label: `${category.name} ${year.name}`,
+                data: data,
+                backgroundColor: category.color + opacity,
+                borderColor: category.color,
+                borderWidth: 1,
+                borderRadius: 4,
+                borderSkipped: false,
+                stack: 'combined',
+                datalabels: {
+                    display: showLabels,
+                    anchor: 'center',
+                    align: 'center',
+                    color: textStyles.dataLabels.color,
+                    font: {
+                        weight: textStyles.dataLabels.fontWeight,
+                        size: textStyles.dataLabels.fontSize
+                    },
+                    formatter: (value) => value > 0 ? value : '',
+                    clip: false
+                }
             };
         }
         
+        /**
+         * Create a trend line dataset configuration
+         * @param {Object} category - Category object
+         * @param {Object} year - Year object
+         * @param {Array} data - Trend data array
+         * @param {boolean} showLabels - Whether to show percentage labels
+         * @returns {Object} Chart.js dataset configuration
+         */
+        function createTrendDataset(category, year, data, showLabels) {
+            const config = trendLineConfig[category.id] || {};
+            const trendColor = config.color || category.color;
+            const thickness = config.thickness || 2;
+            const pointSize = config.pointSize || 4;
+            const opacity = config.opacity || 1.0;
+            const showPoints = config.showPoints !== false;
+            const showLine = config.showLine !== false;
+            
+            return {
+                label: `${category.name} Trend ${year.name}`,
+                data: data,
+                type: 'line',
+                borderColor: trendColor,
+                backgroundColor: 'transparent',
+                borderWidth: thickness,
+                pointRadius: showPoints ? pointSize : 0,
+                pointBackgroundColor: trendColor,
+                pointBorderColor: '#fff',
+                pointBorderWidth: 2,
+                showLine: showLine,
+                tension: 0.2, // Smooth curve
+                yAxisID: 'y1',
+                opacity: opacity,
+                datalabels: {
+                    display: showLabels,
+                    backgroundColor: 'rgba(255,255,255,0.9)',
+                    borderColor: trendColor,
+                    borderRadius: 4,
+                    borderWidth: 1,
+                    color: textStyles.dataLabels.color,
+                    font: {
+                        weight: textStyles.dataLabels.fontWeight,
+                        size: Math.max(8, textStyles.dataLabels.fontSize - 2)
+                    },
+                    padding: 4,
+                    formatter: (value) => value > 0 ? value.toFixed(2) + '%' : '',
+                    clip: false
+                }
+            };
+        }
+        
+        /**
+         * Create chart options configuration for main chart
+         * @param {string} chartType - Chart type ('bar' or 'horizontalBar')
+         * @param {boolean} animation - Whether to enable animations
+         * @param {boolean} showTrendLine - Whether trend lines are shown
+         * @param {Object} prevYear - Previous year object
+         * @param {Object} currYear - Current year object
+         * @returns {Object} Chart.js options configuration
+         */
+        function createMainChartOptions(chartType, animation, showTrendLine, prevYear, currYear) {
+            return {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: {
+                    duration: animation ? 750 : 0,
+                    easing: 'easeInOutQuart'
+                },
+                layout: {
+                    padding: {
+                        top: 50, // Space for function names
+                        bottom: 20,
+                        left: 10,
+                        right: showTrendLine ? 60 : 10 // Space for secondary axis
+                    }
+                },
+                plugins: {
+                    title: {
+                        display: true,
+                        text: `Quality Assurance Review Results (${prevYear.name} vs ${currYear.name})`,
+                        color: textStyles.title.color,
+                        font: {
+                            size: textStyles.title.fontSize,
+                            weight: textStyles.title.fontWeight
+                        },
+                        padding: 20
+                    },
+                    legend: {
+                        display: false // We use custom legend
+                    },
+                    tooltip: createTooltipConfiguration(),
+                    datalabels: {
+                        display: false // Controlled individually per dataset
+                    }
+                },
+                scales: createScalesConfiguration(chartType, showTrendLine),
+                interaction: {
+                    mode: 'index',
+                    intersect: false
+                }
+            };
+        }
+        
+        /**
+         * Create tooltip configuration
+         * @returns {Object} Tooltip configuration
+         */
+        function createTooltipConfiguration() {
+            return {
+                enabled: true,
+                mode: 'index',
+                intersect: false,
+                backgroundColor: 'rgba(0,0,0,0.9)',
+                titleColor: '#fff',
+                bodyColor: '#fff',
+                borderColor: '#667eea',
+                borderWidth: 2,
+                cornerRadius: 8,
+                displayColors: true,
+                titleFont: {
+                    size: 14,
+                    weight: 'bold'
+                },
+                bodyFont: {
+                    size: 12
+                },
+                padding: 12,
+                callbacks: {
+                    title: function(context) {
+                        if (!context.length) return '';
+                        
+                        const dataIndex = context[0].dataIndex;
+                        const sortedFunctions = getSortedFunctions();
+                        
+                        // Determine which function and year this data point belongs to
+                        let currentIndex = 0;
+                        for (let i = 0; i < sortedFunctions.length; i++) {
+                            if (dataIndex === currentIndex) {
+                                return `${sortedFunctions[i].name} ${getPreviousYear().name}`;
+                            } else if (dataIndex === currentIndex + columnSpacing + 1) {
+                                return `${sortedFunctions[i].name} ${getCurrentYear().name}`;
+                            }
+                            currentIndex += 2 + columnSpacing + (i < sortedFunctions.length - 1 ? categoryGap : 0);
+                        }
+                        
+                        return 'Data Point';
+                    },
+                    label: function(context) {
+                        if (context.parsed.y === null) return '';
+                        
+                        const label = context.dataset.label;
+                        const value = context.parsed.y;
+                        
+                        // Format based on dataset type
+                        if (label.includes('Trend')) {
+                            return `${label}: ${value.toFixed(2)}%`;
+                        } else {
+                            return `${label}: ${value}`;
+                        }
+                    },
+                    afterBody: function(context) {
+                        if (!context.length) return '';
+                        
+                        const dataIndex = context[0].dataIndex;
+                        const sortedFunctions = getSortedFunctions();
+                        
+                        // Find the function for this data point
+                        let func = null;
+                        let yearId = null;
+                        let currentIndex = 0;
+                        
+                        for (let i = 0; i < sortedFunctions.length; i++) {
+                            if (dataIndex === currentIndex) {
+                                func = sortedFunctions[i];
+                                yearId = getPreviousYear().id;
+                                break;
+                            } else if (dataIndex === currentIndex + columnSpacing + 1) {
+                                func = sortedFunctions[i];
+                                yearId = getCurrentYear().id;
+                                break;
+                            }
+                            currentIndex += 2 + columnSpacing + (i < sortedFunctions.length - 1 ? categoryGap : 0);
+                        }
+                        
+                        if (func && yearId) {
+                            const total = getFunctionYearTotal(func.id, yearId);
+                            return [`Total Reviews: ${total}`];
+                        }
+                        
+                        return '';
+                    }
+                }
+            };
+        }
+        
+        /**
+         * Create scales configuration for chart
+         * @param {string} chartType - Chart type
+         * @param {boolean} showTrendLine - Whether trend lines are shown
+         * @returns {Object} Scales configuration
+         */
+        function createScalesConfiguration(chartType, showTrendLine) {
+            const isHorizontal = chartType === 'horizontalBar';
+            
+            const scales = {
+                x: {
+                    stacked: true,
+                    grid: {
+                        display: false
+                    },
+                    ticks: {
+                        callback: function(value, index) {
+                            const label = this.getLabelForValue(value);
+                            return label === '' ? '' : label;
+                        },
+                        maxRotation: isHorizontal ? 0 : 45,
+                        minRotation: 0,
+                        color: textStyles.axisLabels.color,
+                        font: {
+                            size: textStyles.axisLabels.fontSize,
+                            weight: textStyles.axisLabels.fontWeight
+                        }
+                    }
+                },
+                y: {
+                    stacked: true,
+                    beginAtZero: true,
+                    grid: {
+                        color: 'rgba(0,0,0,0.1)',
+                        lineWidth: 1
+                    },
+                    ticks: {
+                        color: textStyles.axisLabels.color,
+                        font: {
+                            size: textStyles.axisLabels.fontSize,
+                            weight: textStyles.axisLabels.fontWeight
+                        }
+                    },
+                    title: {
+                        display: true,
+                        text: 'Number of Accounts',
+                        color: textStyles.title.color,
+                        font: {
+                            size: textStyles.title.fontSize,
+                            weight: textStyles.title.fontWeight
+                        }
+                    }
+                }
+            };
+            
+            // Add secondary axis for trend lines
+            if (showTrendLine) {
+                scales.y1 = {
+                    type: 'linear',
+                    display: true,
+                    position: isHorizontal ? 'top' : 'right',
+                    beginAtZero: true,
+                    max: 100,
+                    grid: {
+                        drawOnChartArea: false
+                    },
+                    ticks: {
+                        color: textStyles.axisLabels.color,
+                        font: {
+                            size: textStyles.axisLabels.fontSize,
+                            weight: textStyles.axisLabels.fontWeight
+                        },
+                        callback: function(value) {
+                            return value + '%';
+                        }
+                    },
+                    title: {
+                        display: true,
+                        text: 'Percentage (%)',
+                        color: textStyles.title.color,
+                        font: {
+                            size: textStyles.title.fontSize,
+                            weight: textStyles.title.fontWeight
+                        }
+                    }
+                };
+            }
+            
+            return scales;
+        }
+        
+        /**
+         * Create plugin for rendering function names below the chart
+         * @param {Array} sortedFunctions - Sorted functions array
+         * @param {Array} labels - Chart labels array
+         * @returns {Object} Chart.js plugin
+         */
+        function createFunctionNamePlugin(sortedFunctions, labels) {
+            return {
+                id: 'functionNames',
+                afterDraw: function(chart) {
+                    const ctx = chart.ctx;
+                    const xAxis = chart.scales.x;
+                    const yAxis = chart.scales.y;
+                    
+                    ctx.save();
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'top';
+                    ctx.fillStyle = textStyles.functionNames.color;
+                    ctx.font = `${textStyles.functionNames.fontWeight} ${textStyles.functionNames.fontSize}px Arial`;
+                    
+                    let labelIndex = 0;
+                    sortedFunctions.forEach((func, funcIndex) => {
+                        // Calculate center position between the two year columns for this function
+                        const startPixel = xAxis.getPixelForValue(labelIndex);
+                        const endPixel = xAxis.getPixelForValue(labelIndex + columnSpacing + 1);
+                        const centerX = (startPixel + endPixel) / 2;
+                        
+                        // Position function name below the chart area
+                        const yPosition = chart.chartArea.bottom + 25;
+                        
+                        ctx.fillText(func.name, centerX, yPosition);
+                        
+                        // Move to next function
+                        labelIndex += 2 + columnSpacing + (funcIndex < sortedFunctions.length - 1 ? categoryGap : 0);
+                    });
+                    
+                    ctx.restore();
+                }
+            };
+        }
+        
+        // ===== TREND CHART CREATION =====
+        
+        /**
+         * Create the trend analysis chart showing year-over-year changes
+         */
+        function createTrendChart() {
+            const ctx = document.getElementById('trendChart').getContext('2d');
+            const prevYear = getPreviousYear();
+            const currYear = getCurrentYear();
+            
+            if (!prevYear || !currYear) {
+                console.warn('Cannot create trend chart: Missing year configuration');
+                return;
+            }
+            
+            const trendData = generateTrendChartData();
+            const config = {
+                type: 'line',
+                data: trendData,
+                options: createTrendChartOptions(prevYear, currYear)
+            };
+            
+            // Destroy existing chart and create new one
+            if (trendChart) {
+                trendChart.destroy();
+            }
+            trendChart = new Chart(ctx, config);
+            
+            // Update trend summary cards
+            updateTrendSummary();
+        }
+        
+        /**
+         * Generate data for trend chart
+         * @returns {Object} Chart.js data configuration
+         */
+        function generateTrendChartData() {
+            const prevYear = getPreviousYear();
+            const currYear = getCurrentYear();
+            
+            return {
+                labels: functions.map(f => f.name),
+                datasets: categories.map((category, catIndex) => ({
+                    label: category.name,
+                    data: functions.map(func => {
+                        return getYearOverYearChange(func.id, catIndex);
+                    }),
+                    borderColor: category.color,
+                    backgroundColor: category.color + '20',
+                    borderWidth: 3,
+                    fill: false,
+                    pointRadius: 6,
+                    pointBackgroundColor: category.color,
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 3,
+                    pointHoverRadius: 8,
+                    tension: 0.3
+                }))
+            };
+        }
+        
+        /**
+         * Create options for trend chart
+         * @param {Object} prevYear - Previous year object
+         * @param {Object} currYear - Current year object
+         * @returns {Object} Chart.js options configuration
+         */
+        function createTrendChartOptions(prevYear, currYear) {
+            const animation = document.getElementById('animation')?.value === 'true';
+            
+            return {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: {
+                    duration: animation ? 750 : 0,
+                    easing: 'easeInOutQuart'
+                },
+                plugins: {
+                    title: {
+                        display: true,
+                        text: `Year-over-Year Percentage Point Change (${prevYear.name} to ${currYear.name})`,
+                        color: textStyles.title.color,
+                        font: {
+                            size: textStyles.title.fontSize,
+                            weight: textStyles.title.fontWeight
+                        },
+                        padding: 20
+                    },
+                    legend: {
+                        display: true,
+                        labels: {
+                            usePointStyle: true,
+                            padding: 20,
+                            color: textStyles.legend.color,
+                            font: {
+                                size: textStyles.legend.fontSize,
+                                weight: textStyles.legend.fontWeight
+                            }
+                        }
+                    },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                        backgroundColor: 'rgba(0,0,0,0.9)',
+                        titleColor: '#fff',
+                        bodyColor: '#fff',
+                        borderColor: '#667eea',
+                        borderWidth: 2,
+                        cornerRadius: 8,
+                        callbacks: {
+                            label: function(context) {
+                                const value = context.parsed.y;
+                                const sign = value >= 0 ? '+' : '';
+                                return `${context.dataset.label}: ${sign}${value.toFixed(2)}pp`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: {
+                            display: false
+                        },
+                        ticks: {
+                            color: textStyles.axisLabels.color,
+                            font: {
+                                size: textStyles.axisLabels.fontSize,
+                                weight: textStyles.axisLabels.fontWeight
+                            }
+                        }
+                    },
+                    y: {
+                        grid: {
+                            color: 'rgba(0,0,0,0.1)'
+                        },
+                        ticks: {
+                            color: textStyles.axisLabels.color,
+                            font: {
+                                size: textStyles.axisLabels.fontSize,
+                                weight: textStyles.axisLabels.fontWeight
+                            },
+                            callback: function(value) {
+                                const sign = value >= 0 ? '+' : '';
+                                return sign + value + 'pp';
+                            }
+                        },
+                        title: {
+                            display: true,
+                            text: 'Percentage Point Change',
+                            color: textStyles.title.color,
+                            font: {
+                                size: textStyles.title.fontSize,
+                                weight: textStyles.title.fontWeight
+                            }
+                        }
+                    }
+                },
+                interaction: {
+                    mode: 'index',
+                    intersect: false
+                }
+            };
+        }
+        
+        // ===== MAXIMIZED CHART CREATION =====
+        
+        /**
+         * Create maximized version of the main chart
+         */
+        function createMaximizedChart() {
+            const canvas = document.getElementById('qaChartMaximized');
+            if (!canvas) return;
+            
+            const ctx = canvas.getContext('2d');
+            const sortedFunctions = getSortedFunctions();
+            const prevYear = getPreviousYear();
+            const currYear = getCurrentYear();
+            
+            if (!prevYear || !currYear) return;
+            
+            // Use same data generation as main chart
+            const labels = generateChartLabels(sortedFunctions);
+            const showDataLabels = document.getElementById('showDataLabels')?.checked || false;
+            const showValues = document.getElementById('showValues')?.checked || false;
+            const showPercentages = document.getElementById('showPercentages')?.checked || false;
+            const showTrendLine = document.getElementById('showTrendLine')?.checked || false;
+            const chartType = document.getElementById('chartType')?.value || 'bar';
+            
+            const datasets = generateChartDatasets(
+                sortedFunctions, 
+                labels, 
+                showDataLabels, 
+                showValues, 
+                showPercentages, 
+                showTrendLine
+            );
+            
+            // Create maximized chart configuration with enhanced styling
+            const config = {
+                type: chartType,
+                data: { labels, datasets },
+                options: {
+                    ...createMainChartOptions(chartType, true, showTrendLine, prevYear, currYear),
+                    layout: {
+                        padding: {
+                            top: 60,
+                            bottom: 40,
+                            left: 20,
+                            right: showTrendLine ? 80 : 20
+                        }
+                    },
+                    plugins: {
+                        ...createMainChartOptions(chartType, true, showTrendLine, prevYear, currYear).plugins,
+                        title: {
+                            display: true,
+                            text: `Quality Assurance Review Results (${prevYear.name} vs ${currYear.name}) - Maximized View`,
+                            color: textStyles.title.color,
+                            font: {
+                                size: Math.max(20, textStyles.title.fontSize + 4),
+                                weight: textStyles.title.fontWeight
+                            },
+                            padding: 30
+                        }
+                    }
+                },
+                plugins: [createFunctionNamePlugin(sortedFunctions, labels)]
+            };
+            
+            // Create maximized chart
+            if (maximizedChart) {
+                maximizedChart.destroy();
+            }
+            maximizedChart = new Chart(ctx, config);
+        }
+        
+        // ===== CHART ACCESSIBILITY =====
+        
+        /**
+         * Update chart accessibility attributes and descriptions
+         */
+        function updateChartAccessibility() {
+            const canvas = document.getElementById('qaChart');
+            const prevYear = getPreviousYear();
+            const currYear = getCurrentYear();
+            
+            if (!canvas || !prevYear || !currYear) return;
+            
+            let description = `Interactive chart showing quality assurance review results comparing ${prevYear.name} and ${currYear.name}. `;
+            
+            // Add summary statistics
+            functions.forEach(func => {
+                const prevTotal = getFunctionYearTotal(func.id, prevYear.id);
+                const currTotal = getFunctionYearTotal(func.id, currYear.id);
+                const prevPassRate = getCategoryPercentage(func.id, prevYear.id, 0);
+                const currPassRate = getCategoryPercentage(func.id, currYear.id, 0);
+                
+                description += `${func.name}: ${prevYear.name} had ${prevTotal} reviews with ${prevPassRate.toFixed(1)}% pass rate, ${currYear.name} had ${currTotal} reviews with ${currPassRate.toFixed(1)}% pass rate. `;
+            });
+            
+            // Add interaction instructions
+            description += 'Use arrow keys to navigate chart elements. Press Tab to access chart controls.';
+            
+            canvas.setAttribute('aria-label', description);
+            canvas.setAttribute('role', 'img');
+            canvas.setAttribute('tabindex', '0');
+        }
+        
+        // ===== CHART INTEGRATION FUNCTIONS =====
+        
+        /**
+         * Create both main and trend charts
+         * Main entry point for chart creation
+         */
+        function createCharts() {
+            try {
+                createMainChart();
+                createTrendChart();
+                
+                // Update related UI elements
+                updateShadingPreview();
+                updateTextStyleDisplays();
+                
+                console.log('Charts created successfully');
+            } catch (error) {
+                console.error('Error creating charts:', error);
+                announceChange('Error creating charts. Please check your data.');
+            }
+        }
+        
+        // ===== INITIALIZATION FUNCTION =====
+        
+        /**
+         * Initialize the entire dashboard
+         * Sets up all components and renders initial state
+         */
+        function initializeDashboard() {
+            try {
+                // Initialize text style displays
+                updateTextStyleDisplays();
+                
+                // Render all UI components
+                renderYears();
+                renderCategories();
+                renderFunctions();
+                renderTrendLineControls();
+                renderDataInput();
+                
+                // Create initial charts
+                createCharts();
+                
+                // Update shading preview
+                updateShadingPreview();
+                
+                // Toggle data label options based on initial state
+                toggleDataLabelOptions();
+                
+                // Initialize spacing controls
+                document.getElementById('columnSpacingValue').textContent = columnSpacing;
+                document.getElementById('categoryGapValue').textContent = categoryGap;
+                
+                // Set up event listeners
+                initializeEventListeners();
+                
+                // Create announcement element for accessibility
+                if (!document.getElementById('announcement')) {
+                    const announcement = document.createElement('div');
+                    announcement.id = 'announcement';
+                    announcement.className = 'sr-only';
+                    announcement.setAttribute('aria-live', 'polite');
+                    announcement.setAttribute('aria-atomic', 'true');
+                    document.body.appendChild(announcement);
+                }
+                
+                // Initial accessibility update
+                updateChartAccessibility();
+                
+                // Announce successful initialization
+                announceChange('Dashboard initialized successfully');
+                
+                console.log('Dashboard initialization complete');
+                
+            } catch (error) {
+                console.error('Error initializing dashboard:', error);
+                
+                // Show error message to user
+                const errorMessage = document.createElement('div');
+                errorMessage.style.cssText = `
+                    position: fixed;
+                    top: 20px;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    background: #f44336;
+                    color: white;
+                    padding: 15px 20px;
+                    border-radius: 8px;
+                    z-index: 10000;
+                    font-weight: bold;
+                `;
+                errorMessage.textContent = 'Error initializing dashboard. Please refresh the page.';
+                document.body.appendChild(errorMessage);
+                
+                // Auto-remove error message after 5 seconds
+                setTimeout(() => {
+                    if (errorMessage.parentElement) {
+                        errorMessage.remove();
+                    }
+                }, 5000);
+            }
+        }
+        
+        // ===== DATA EXPORT & IMPORT FUNCTIONS =====
+        
+        /**
+         * Export all dashboard configuration and data as JSON
+         * @returns {string} JSON string of complete dashboard state
+         */
+        function exportDashboardData() {
+            const dashboardState = {
+                version: '1.0',
+                timestamp: new Date().toISOString(),
+                configuration: {
+                    years: years,
+                    categories: categories,
+                    functions: functions,
+                    functionData: functionData,
+                    textStyles: textStyles,
+                    trendLineConfig: trendLineConfig,
+                    columnSpacing: columnSpacing,
+                    categoryGap: categoryGap
+                },
+                metadata: {
+                    exportCount: exportCounter,
+                    totalFunctions: functions.length,
+                    totalCategories: categories.length,
+                    totalYears: years.length
+                }
+            };
+            
+            return JSON.stringify(dashboardState, null, 2);
+        }
+        
+        /**
+         * Import dashboard configuration from JSON data
+         * @param {string} jsonData - JSON string containing dashboard state
+         * @returns {boolean} Success status
+         */
+        function importDashboardData(jsonData) {
+            try {
+                const dashboardState = JSON.parse(jsonData);
+                
+                // Validate data structure
+                if (!dashboardState.configuration) {
+                    throw new Error('Invalid data format: missing configuration');
+                }
+                
+                const config = dashboardState.configuration;
+                
+                // Import data with validation
+                if (config.years && Array.isArray(config.years)) {
+                    years = config.years;
+                }
+                if (config.categories && Array.isArray(config.categories)) {
+                    categories = config.categories;
+                }
+                if (config.functions && Array.isArray(config.functions)) {
+                    functions = config.functions;
+                }
+                if (config.functionData && typeof config.functionData === 'object') {
+                    functionData = config.functionData;
+                }
+                if (config.textStyles && typeof config.textStyles === 'object') {
+                    textStyles = { ...textStyles, ...config.textStyles };
+                }
+                if (config.trendLineConfig && typeof config.trendLineConfig === 'object') {
+                    trendLineConfig = { ...trendLineConfig, ...config.trendLineConfig };
+                }
+                if (typeof config.columnSpacing === 'number') {
+                    columnSpacing = config.columnSpacing;
+                }
+                if (typeof config.categoryGap === 'number') {
+                    categoryGap = config.categoryGap;
+                }
+                
+                // Re-initialize dashboard with imported data
+                initializeDashboard();
+                
+                announceChange('Dashboard data imported successfully');
+                return true;
+                
+            } catch (error) {
+                console.error('Error importing dashboard data:', error);
+                announceChange('Error importing data. Please check the file format.');
+                return false;
+            }
+        }
+        
+        // ===== PERFORMANCE OPTIMIZATION FUNCTIONS =====
+        
+        /**
+         * Optimize chart performance for large datasets
+         */
+        function optimizeChartPerformance() {
+            // Disable animations for large datasets
+            if (functions.length > 10 || categories.length > 8) {
+                const animationSelect = document.getElementById('animation');
+                if (animationSelect && animationSelect.value === 'true') {
+                    animationSelect.value = 'false';
+                    announceChange('Animations disabled for better performance with large dataset');
+                }
+            }
+            
+            // Reduce point sizes for trend lines if there are many data points
+            const totalDataPoints = functions.length * years.length * categories.length;
+            if (totalDataPoints > 100) {
+                Object.keys(trendLineConfig).forEach(categoryId => {
+                    if (trendLineConfig[categoryId].pointSize > 3) {
+                        trendLineConfig[categoryId].pointSize = 3;
+                    }
+                });
+            }
+        }
+        
+        /**
+         * Clean up chart instances and event listeners
+         */
+        function cleanup() {
+            // Destroy chart instances
+            if (chart) {
+                chart.destroy();
+                chart = null;
+            }
+            if (trendChart) {
+                trendChart.destroy();
+                trendChart = null;
+            }
+            if (maximizedChart) {
+                maximizedChart.destroy();
+                maximizedChart = null;
+            }
+            
+            // Clear exported images from memory
+            exportedImages = [];
+            exportCounter = 1;
+            
+            console.log('Dashboard cleanup completed');
+        }
+        
+        // ===== ERROR HANDLING & VALIDATION =====
+        
+        /**
+         * Validate chart data before rendering
+         * @returns {Object} Validation result with status and issues
+         */
+        function validateChartData() {
+            const issues = [];
+            
+            // Check for minimum requirements
+            if (functions.length === 0) {
+                issues.push('No functions configured');
+            }
+            if (categories.length === 0) {
+                issues.push('No categories configured');
+            }
+            if (years.length < 2) {
+                issues.push('At least two years required for comparison');
+            }
+            
+            // Check for previous and current year designation
+            const hasPrevious = years.some(y => y.type === 'previous');
+            const hasCurrent = years.some(y => y.type === 'current');
+            
+            if (!hasPrevious) {
+                issues.push('No year designated as "previous"');
+            }
+            if (!hasCurrent) {
+                issues.push('No year designated as "current"');
+            }
+            
+            // Check data completeness
+            functions.forEach(func => {
+                years.forEach(year => {
+                    if (!functionData[func.id] || !functionData[func.id][year.id]) {
+                        issues.push(`Missing data for ${func.name} in ${year.name}`);
+                    } else if (functionData[func.id][year.id].length !== categories.length) {
+                        issues.push(`Incomplete data for ${func.name} in ${year.name}`);
+                    }
+                });
+            });
+            
+            return {
+                valid: issues.length === 0,
+                issues: issues
+            };
+        }
+        
+        /**
+         * Handle chart creation errors gracefully
+         * @param {Error} error - Error object
+         * @param {string} context - Context where error occurred
+         */
+        function handleChartError(error, context = 'chart creation') {
+            console.error(`Error in ${context}:`, error);
+            
+            // Show user-friendly error message
+            const errorContainer = document.createElement('div');
+            errorContainer.className = 'chart-error';
+            errorContainer.style.cssText = `
+                background: #ffebee;
+                border: 2px solid #f44336;
+                border-radius: 8px;
+                padding: 20px;
+                margin: 20px;
+                color: #c62828;
+                text-align: center;
+            `;
+            errorContainer.innerHTML = `
+                <h3>Chart Error</h3>
+                <p>There was an error creating the charts. Please check your data configuration.</p>
+                <button onclick="this.parentElement.remove(); createCharts();" 
+                        style="background: #f44336; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-top: 10px;">
+                    Retry
+                </button>
+            `;
+            
+            // Replace chart container content with error message
+            const chartContainer = document.getElementById('chartContainer');
+            if (chartContainer) {
+                chartContainer.appendChild(errorContainer);
+            }
+            
+            announceChange(`Error in ${context}. Please check your configuration.`);
+        }
+        
+        // ===== BROWSER COMPATIBILITY FUNCTIONS =====
+        
+        /**
+         * Check browser compatibility and provide fallbacks
+         * @returns {Object} Compatibility status and missing features
+         */
+        function checkBrowserCompatibility() {
+            const features = {
+                canvas: !!document.createElement('canvas').getContext,
+                localStorage: typeof(Storage) !== 'undefined',
+                css3: typeof(document.body.style.borderRadius) !== 'undefined',
+                es6: typeof(Array.from) === 'function'
+            };
+            
+            const missing = Object.keys(features).filter(key => !features[key]);
+            
+            if (missing.length > 0) {
+                console.warn('Missing browser features:', missing);
+                
+                // Show compatibility warning
+                const warning = document.createElement('div');
+                warning.style.cssText = `
+                    background: #fff3cd;
+                    border: 2px solid #ffc107;
+                    border-radius: 8px;
+                    padding: 15px;
+                    margin: 10px;
+                    color: #856404;
+                `;
+                warning.innerHTML = `
+                    <strong>Browser Compatibility Notice:</strong>
+                    Some features may not work properly in your browser. 
+                    Please consider upgrading to a modern browser for the best experience.
+                `;
+                
+                document.body.insertBefore(warning, document.body.firstChild);
+            }
+            
+            return {
+                compatible: missing.length === 0,
+                missing: missing,
+                features: features
+            };
+        }
+        
+        // ===== DASHBOARD INITIALIZATION ON PAGE LOAD =====
+        
+        /**
+         * Initialize dashboard when DOM is ready
+         */
+        document.addEventListener('DOMContentLoaded', function() {
+            // Check browser compatibility
+            const compatibility = checkBrowserCompatibility();
+            
+            if (compatibility.compatible) {
+                // Initialize dashboard
+                initializeDashboard();
+                
+                // Set up performance optimization
+                optimizeChartPerformance();
+                
+                console.log('Dashboard ready and fully functional');
+            } else {
+                console.warn('Dashboard initialized with limited functionality due to browser compatibility issues');
+                
+                // Try to initialize anyway with fallbacks
+                try {
+                    initializeDashboard();
+                } catch (error) {
+                    handleChartError(error, 'dashboard initialization');
+                }
+            }
+        });
+        
+        // ===== WINDOW UNLOAD CLEANUP =====
+        
+        /**
+         * Clean up resources when page is unloaded
+         */
+        window.addEventListener('beforeunload', function() {
+            cleanup();
+        });
+        
+        // ===== GLOBAL ERROR HANDLING =====
+        
+        /**
+         * Global error handler for uncaught errors
+         */
+        window.addEventListener('error', function(event) {
+            console.error('Global error:', event.error);
+            handleChartError(event.error, 'global error handler');
+        });
+        
+        // ===== EXPOSED GLOBAL FUNCTIONS FOR DEBUGGING =====
+        
+        /**
+         * Expose useful functions globally for debugging and testing
+         */
+        window.dashboardDebug = {
+            exportData: exportDashboardData,
+            importData: importDashboardData,
+            validateData: validateDataIntegrity,
+            validateChart: validateChartData,
+            recreateCharts: createCharts,
+            cleanup: cleanup,
+            getState: () => ({
+                functions,
+                categories,
+                years,
+                functionData,
+                textStyles,
+                trendLineConfig,
+                exportedImages
+            })
+        };
+        
         /* ===========================================
-           END OF PART 4: UI MANAGEMENT & EVENT HANDLERS
+           END OF PART 5: CHART CREATION & ADVANCED FEATURES
            =========================================== */
     </script>
 </body>
