@@ -3,8 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Modular QA Review Analytics Dashboard</title>
+    <title>Accessible QA Review Analytics Dashboard</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-datalabels/2.2.0/chartjs-plugin-datalabels.min.js"></script>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -12,10 +13,11 @@
             margin: 0;
             padding: 20px;
             min-height: 100vh;
+            line-height: 1.6;
         }
         
         .container {
-            max-width: 1400px;
+            max-width: 1600px;
             margin: 0 auto;
             background: white;
             border-radius: 15px;
@@ -45,7 +47,7 @@
         
         .dashboard {
             display: grid;
-            grid-template-columns: 1fr 350px;
+            grid-template-columns: 1fr 400px;
             gap: 20px;
             padding: 20px;
         }
@@ -103,13 +105,14 @@
             font-weight: 600;
         }
         
-        .control-group button:hover {
+        .control-group button:hover, .control-group button:focus {
             background: #5a6fd8;
             transform: translateY(-1px);
+            outline: 3px solid #667eea40;
         }
         
         .control-group input:focus, .control-group select:focus {
-            outline: none;
+            outline: 3px solid #667eea;
             border-color: #667eea;
         }
         
@@ -141,6 +144,11 @@
             border-radius: 10px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.05);
             margin-bottom: 15px;
+            border: 2px solid transparent;
+        }
+        
+        .function-input:focus-within {
+            border-color: #667eea;
         }
         
         .function-input h3 {
@@ -149,6 +157,24 @@
             font-size: 16px;
             border-bottom: 2px solid #667eea;
             padding-bottom: 8px;
+        }
+        
+        .category-header {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+            gap: 8px;
+            margin-bottom: 10px;
+            padding: 8px;
+            background: #e3f2fd;
+            border-radius: 6px;
+        }
+        
+        .category-header-item {
+            text-align: center;
+            font-weight: bold;
+            font-size: 12px;
+            color: #333;
+            padding: 4px;
         }
         
         .year-data {
@@ -165,37 +191,41 @@
         }
         
         .grade-inputs {
-            display: flex;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
             gap: 8px;
-            flex-wrap: wrap;
         }
         
         .grade-inputs input {
-            width: 50px;
-            padding: 6px;
-            border: 1px solid #ddd;
+            width: 100%;
+            padding: 8px;
+            border: 2px solid #ddd;
             border-radius: 6px;
             text-align: center;
-            font-size: 12px;
+            font-size: 14px;
+            font-weight: 600;
         }
         
         .grade-inputs input:focus {
             outline: none;
             border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
         }
         
         .remove-button {
             background: #f44336;
             color: white;
             border: none;
-            padding: 5px 10px;
+            padding: 8px 12px;
             border-radius: 5px;
             cursor: pointer;
             font-size: 12px;
+            font-weight: bold;
         }
         
-        .remove-button:hover {
+        .remove-button:hover, .remove-button:focus {
             background: #d32f2f;
+            outline: 3px solid #f4433640;
         }
         
         .add-item {
@@ -208,8 +238,14 @@
         .add-item input, .add-item select {
             flex: 1;
             padding: 8px;
-            border: 1px solid #ddd;
+            border: 2px solid #ddd;
             border-radius: 6px;
+        }
+        
+        .add-item input:focus, .add-item select:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
         }
         
         .add-item button {
@@ -220,28 +256,35 @@
             border-radius: 6px;
             cursor: pointer;
             white-space: nowrap;
+            font-weight: bold;
         }
         
-        .add-item button:hover {
+        .add-item button:hover, .add-item button:focus {
             background: #45a049;
+            outline: 3px solid #4CAF5040;
         }
         
         .item {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 8px;
+            padding: 10px;
             background: white;
-            margin-bottom: 5px;
+            margin-bottom: 8px;
             border-radius: 6px;
-            border: 1px solid #eee;
+            border: 2px solid #eee;
+        }
+        
+        .item:focus-within {
+            border-color: #667eea;
         }
         
         .item-color {
-            width: 20px;
-            height: 20px;
+            width: 24px;
+            height: 24px;
             border-radius: 4px;
-            margin-right: 10px;
+            margin-right: 12px;
+            border: 2px solid #333;
         }
         
         .item-info {
@@ -254,11 +297,11 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 10px;
+            padding: 12px;
             background: white;
             margin-bottom: 8px;
             border-radius: 6px;
-            border: 1px solid #eee;
+            border: 2px solid #eee;
         }
         
         .year-controls {
@@ -268,7 +311,7 @@
         }
         
         .year-indicator {
-            padding: 4px 8px;
+            padding: 6px 12px;
             border-radius: 4px;
             font-size: 12px;
             font-weight: bold;
@@ -293,19 +336,29 @@
             align-items: center;
             gap: 10px;
             margin-bottom: 8px;
+            padding: 8px;
+            background: white;
+            border-radius: 6px;
+            border: 2px solid #eee;
+        }
+        
+        .sort-item:focus-within {
+            border-color: #667eea;
         }
         
         .sort-item button {
-            padding: 4px 8px;
-            border: 1px solid #ddd;
+            padding: 6px 10px;
+            border: 2px solid #ddd;
             background: white;
             border-radius: 4px;
             cursor: pointer;
             font-size: 12px;
+            font-weight: bold;
         }
         
-        .sort-item button:hover {
+        .sort-item button:hover, .sort-item button:focus {
             background: #f0f0f0;
+            outline: 3px solid #66666640;
         }
         
         .sort-item button:disabled {
@@ -326,8 +379,40 @@
             margin-top: 0;
         }
         
+        .data-labels-section {
+            background: #e8f5e8;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }
+        
+        .checkbox-group {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        .checkbox-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .checkbox-item input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            accent-color: #667eea;
+        }
+        
+        .checkbox-item label {
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+        }
+        
         canvas {
-            max-height: 500px;
+            max-height: 600px;
         }
         
         .trend-summary {
@@ -343,6 +428,11 @@
             padding: 20px;
             border-radius: 10px;
             text-align: center;
+            border: 2px solid transparent;
+        }
+        
+        .trend-card:focus {
+            outline: 3px solid #667eea;
         }
         
         .trend-card h4 {
@@ -376,12 +466,21 @@
             gap: 8px;
             font-size: 14px;
             font-weight: 500;
+            padding: 8px;
+            border-radius: 6px;
+            border: 2px solid transparent;
+        }
+        
+        .legend-item:focus {
+            border-color: #667eea;
+            outline: none;
         }
         
         .legend-color {
-            width: 16px;
-            height: 16px;
+            width: 20px;
+            height: 20px;
             border-radius: 4px;
+            border: 2px solid #333;
         }
         
         .shading-controls {
@@ -396,10 +495,23 @@
             align-items: center;
             gap: 10px;
             margin-bottom: 8px;
+            padding: 8px;
+            border-radius: 4px;
+        }
+        
+        .shading-option:focus-within {
+            background: rgba(102, 126, 234, 0.1);
         }
         
         .shading-option input[type="radio"] {
-            margin: 0;
+            width: 18px;
+            height: 18px;
+            accent-color: #667eea;
+        }
+        
+        .shading-option label {
+            font-weight: 500;
+            cursor: pointer;
         }
         
         .shading-preview {
@@ -410,10 +522,120 @@
         }
         
         .preview-box {
-            width: 30px;
-            height: 20px;
+            width: 40px;
+            height: 30px;
             border-radius: 4px;
-            border: 1px solid #ccc;
+            border: 2px solid #333;
+        }
+        
+        .spacing-controls {
+            background: #fff3e0;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }
+        
+        .spacing-control {
+            margin-bottom: 15px;
+        }
+        
+        .spacing-control:last-child {
+            margin-bottom: 0;
+        }
+        
+        .spacing-control label {
+            display: block;
+            font-weight: 600;
+            color: #555;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+        
+        .spacing-control .value-display {
+            font-weight: bold;
+            color: #667eea;
+        }
+        
+        .spacing-control input[type="range"] {
+            width: 100%;
+            height: 6px;
+            border-radius: 3px;
+            background: #ddd;
+            outline: none;
+            -webkit-appearance: none;
+            appearance: none;
+        }
+        
+        .spacing-control input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #667eea;
+            cursor: pointer;
+            border: 2px solid #fff;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        .spacing-control input[type="range"]::-moz-range-thumb {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #667eea;
+            cursor: pointer;
+            border: 2px solid #fff;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        .spacing-control input[type="range"]:focus {
+            outline: 3px solid rgba(102, 126, 234, 0.3);
+        }
+        
+        .spacing-description {
+            font-size: 12px;
+            color: #666;
+            margin-top: 4px;
+            font-style: italic;
+        }
+        
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+        
+        .skip-link {
+            position: absolute;
+            top: -40px;
+            left: 6px;
+            background: #667eea;
+            color: white;
+            padding: 8px;
+            text-decoration: none;
+            border-radius: 4px;
+            z-index: 1000;
+        }
+        
+        .skip-link:focus {
+            top: 6px;
+        }
+        
+        [role="region"] {
+            border: 2px solid transparent;
+            border-radius: 8px;
+            padding: 10px;
+        }
+        
+        [role="region"]:focus {
+            border-color: #667eea;
+            outline: none;
         }
         
         @media (max-width: 1024px) {
@@ -444,36 +666,62 @@
                 padding: 15px;
                 grid-template-columns: 1fr;
             }
+            
+            .checkbox-group {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        @media (prefers-reduced-motion: reduce) {
+            * {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+            }
+        }
+        
+        @media (prefers-high-contrast: active) {
+            .container {
+                border: 3px solid;
+            }
+            
+            .function-input, .item, .year-item, .sort-item {
+                border-width: 3px;
+            }
         }
     </style>
 </head>
 <body>
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+    
     <div class="container">
-        <div class="header">
-            <h1>Modular QA Review Analytics Dashboard</h1>
-            <p>Fully Customizable Review Analysis with Dynamic Years, Categories & Functions</p>
-        </div>
+        <header class="header">
+            <h1>Accessible QA Review Analytics Dashboard</h1>
+            <p>Fully Customizable Review Analysis with Enhanced Accessibility & Data Labels</p>
+        </header>
         
         <div class="dashboard">
-            <div class="main-content">
-                <div class="controls">
+            <main id="main-content" class="main-content">
+                <section class="controls" role="region" aria-label="Chart Controls" tabindex="0">
                     <div class="control-group">
-                        <label>Chart Type</label>
-                        <select id="chartType">
+                        <label for="chartType">Chart Type</label>
+                        <select id="chartType" aria-describedby="chartType-help">
                             <option value="bar">Stacked Column</option>
                             <option value="horizontalBar">Stacked Bar</option>
                         </select>
+                        <div id="chartType-help" class="sr-only">Choose between vertical or horizontal stacked chart display</div>
                     </div>
                     <div class="control-group">
-                        <label>Animation</label>
-                        <select id="animation">
+                        <label for="animation">Animation</label>
+                        <select id="animation" aria-describedby="animation-help">
                             <option value="true">Enabled</option>
                             <option value="false">Disabled</option>
                         </select>
+                        <div id="animation-help" class="sr-only">Enable or disable chart animations for better accessibility</div>
                     </div>
                     <div class="control-group">
-                        <label>Sort By</label>
-                        <select id="sortBy">
+                        <label for="sortBy">Sort By</label>
+                        <select id="sortBy" aria-describedby="sortBy-help">
                             <option value="default">Default Order</option>
                             <option value="name">Function Name</option>
                             <option value="totalPrevious">Previous Year Total</option>
@@ -481,49 +729,89 @@
                             <option value="improvement">Improvement Rate</option>
                             <option value="passRateCurrent">Current Year Pass Rate</option>
                         </select>
+                        <div id="sortBy-help" class="sr-only">Choose how to sort functions in the chart</div>
                     </div>
                     <div class="control-group">
-                        <label>Sort Direction</label>
-                        <select id="sortDirection">
+                        <label for="sortDirection">Sort Direction</label>
+                        <select id="sortDirection" aria-describedby="sortDirection-help">
                             <option value="asc">Ascending</option>
                             <option value="desc">Descending</option>
                         </select>
+                        <div id="sortDirection-help" class="sr-only">Choose ascending or descending sort order</div>
                     </div>
                     <div class="control-group">
-                        <label>Add Function</label>
-                        <input type="text" id="newFunctionName" placeholder="Function name">
+                        <label for="newFunctionName">Add Function</label>
+                        <input type="text" id="newFunctionName" placeholder="Function name" aria-describedby="newFunction-help">
+                        <div id="newFunction-help" class="sr-only">Enter a new function name to add to the analysis</div>
                     </div>
                     <div class="control-group">
                         <label>&nbsp;</label>
-                        <button onclick="addFunction()">Add Function</button>
+                        <button onclick="addFunction()" aria-describedby="addFunction-help">Add Function</button>
+                        <div id="addFunction-help" class="sr-only">Click to add the new function to the dashboard</div>
                     </div>
-                </div>
+                </section>
                 
-                <div class="chart-container">
-                    <canvas id="qaChart"></canvas>
-                    <div class="legend-custom" id="legendContainer"></div>
-                </div>
+                <section class="chart-container" role="region" aria-label="Main Chart" tabindex="0">
+                    <canvas id="qaChart" role="img" aria-label="Quality Assurance Review Results Chart"></canvas>
+                    <div class="legend-custom" id="legendContainer" role="list" aria-label="Chart Legend"></div>
+                </section>
                 
-                <div class="trend-container">
+                <section class="trend-container" role="region" aria-label="Trend Analysis" tabindex="0">
                     <h3>Trend Analysis</h3>
-                    <div class="trend-summary" id="trendSummary"></div>
-                    <canvas id="trendChart"></canvas>
-                </div>
+                    <div class="trend-summary" id="trendSummary" role="list" aria-label="Trend Summary Cards"></div>
+                    <canvas id="trendChart" role="img" aria-label="Trend Analysis Chart"></canvas>
+                </section>
                 
-                <div class="data-input" id="dataInputContainer"></div>
-            </div>
+                <section class="data-input" id="dataInputContainer" role="region" aria-label="Data Input Form" tabindex="0"></section>
+            </main>
             
-            <div class="sidebar">
+            <aside class="sidebar" role="complementary" aria-label="Configuration Panel">
                 <div class="section-header">Years</div>
                 <div class="add-item">
-                    <input type="text" id="newYearName" placeholder="Year (e.g., 2023)">
-                    <select id="yearType">
+                    <input type="text" id="newYearName" placeholder="Year (e.g., 2023)" aria-label="New Year Name">
+                    <select id="yearType" aria-label="Year Type">
                         <option value="previous">Previous</option>
                         <option value="current">Current</option>
                     </select>
                     <button onclick="addYear()">Add</button>
                 </div>
-                <div id="yearsList"></div>
+                <div id="yearsList" role="list" aria-label="Years List"></div>
+                
+                <div class="section-header">Chart Spacing</div>
+                <div class="spacing-controls">
+                    <div class="spacing-control">
+                        <label for="columnSpacing">Column Spacing: <span class="value-display" id="columnSpacingValue">1</span></label>
+                        <input type="range" id="columnSpacing" min="0" max="5" value="1" aria-describedby="columnSpacing-help">
+                        <div id="columnSpacing-help" class="spacing-description">Adjust space between year columns within each function</div>
+                    </div>
+                    <div class="spacing-control">
+                        <label for="categoryGap">Category Gap: <span class="value-display" id="categoryGapValue">3</span></label>
+                        <input type="range" id="categoryGap" min="1" max="8" value="3" aria-describedby="categoryGap-help">
+                        <div id="categoryGap-help" class="spacing-description">Adjust gap between different function categories</div>
+                    </div>
+                </div>
+                
+                <div class="section-header">Data Labels</div>
+                <div class="data-labels-section">
+                    <div class="checkbox-item">
+                        <input type="checkbox" id="showDataLabels" checked>
+                        <label for="showDataLabels">Show Data Labels</label>
+                    </div>
+                    <div class="checkbox-group" id="dataLabelOptions">
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="showValues" checked>
+                            <label for="showValues">Values</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="showPercentages">
+                            <label for="showPercentages">Percentages</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="showTrendLine" checked>
+                            <label for="showTrendLine">Trend Lines</label>
+                        </div>
+                    </div>
+                </div>
                 
                 <div class="section-header">Shading Options</div>
                 <div class="shading-controls">
@@ -536,35 +824,40 @@
                         <label for="shadingManual">Manual Opacity Control</label>
                     </div>
                     <div id="manualOpacityControls" style="display: none;">
-                        <label>Previous Year Opacity: <span id="prevOpacityValue">50%</span></label>
-                        <input type="range" id="prevOpacity" min="10" max="100" value="50" style="width: 100%;">
-                        <label>Current Year Opacity: <span id="currOpacityValue">100%</span></label>
-                        <input type="range" id="currOpacity" min="10" max="100" value="100" style="width: 100%;">
+                        <label for="prevOpacity">Previous Year Opacity: <span id="prevOpacityValue">50%</span></label>
+                        <input type="range" id="prevOpacity" min="10" max="100" value="50" style="width: 100%;" aria-describedby="prevOpacity-help">
+                        <div id="prevOpacity-help" class="sr-only">Adjust opacity for previous year data from 10% to 100%</div>
+                        <label for="currOpacity">Current Year Opacity: <span id="currOpacityValue">100%</span></label>
+                        <input type="range" id="currOpacity" min="10" max="100" value="100" style="width: 100%;" aria-describedby="currOpacity-help">
+                        <div id="currOpacity-help" class="sr-only">Adjust opacity for current year data from 10% to 100%</div>
                     </div>
                     <div class="shading-preview">
                         <span>Preview:</span>
-                        <div class="preview-box" id="prevPreview" style="background-color: #4CAF5080;"></div>
-                        <div class="preview-box" id="currPreview" style="background-color: #4CAF50;"></div>
+                        <div class="preview-box" id="prevPreview" style="background-color: #4CAF5080;" aria-label="Previous year color preview"></div>
+                        <div class="preview-box" id="currPreview" style="background-color: #4CAF50;" aria-label="Current year color preview"></div>
                     </div>
                 </div>
                 
                 <div class="section-header">Categories</div>
                 <div class="add-item">
-                    <input type="text" id="newCategoryName" placeholder="Category name">
-                    <input type="color" id="newCategoryColor" value="#2196F3">
+                    <input type="text" id="newCategoryName" placeholder="Category name" aria-label="New Category Name">
+                    <input type="color" id="newCategoryColor" value="#2196F3" aria-label="Category Color">
                     <button onclick="addCategory()">Add</button>
                 </div>
-                <div id="categoriesList"></div>
+                <div id="categoriesList" role="list" aria-label="Categories List"></div>
                 
                 <div class="section-header">Functions</div>
-                <div class="sorting-controls" id="functionsList"></div>
-            </div>
+                <div class="sorting-controls" id="functionsList" role="list" aria-label="Functions List"></div>
+            </aside>
         </div>
     </div>
-
-    <script>
+<script>
+        Chart.register(ChartDataLabels);
+        
         let chart;
         let trendChart;
+        let columnSpacing = 1;
+        let categoryGap = 3;
         
         let years = [
             { name: '2024', type: 'previous', id: 'y2024' },
@@ -625,6 +918,16 @@
             document.getElementById('currPreview').style.backgroundColor = currColor;
         }
         
+        function updateSpacing() {
+            columnSpacing = parseInt(document.getElementById('columnSpacing').value);
+            categoryGap = parseInt(document.getElementById('categoryGap').value);
+            
+            document.getElementById('columnSpacingValue').textContent = columnSpacing;
+            document.getElementById('categoryGapValue').textContent = categoryGap;
+            
+            createCharts();
+        }
+        
         function renderYears() {
             const container = document.getElementById('yearsList');
             container.innerHTML = '';
@@ -632,6 +935,7 @@
             years.forEach((year, index) => {
                 const item = document.createElement('div');
                 item.className = 'year-item';
+                item.setAttribute('role', 'listitem');
                 item.innerHTML = `
                     <div style="display: flex; align-items: center; gap: 10px;">
                         <span>${year.name}</span>
@@ -640,10 +944,10 @@
                         </span>
                     </div>
                     <div class="year-controls">
-                        <button onclick="toggleYearType(${index})" style="padding: 4px 8px; font-size: 11px;">
+                        <button onclick="toggleYearType(${index})" aria-label="Switch ${year.name} to ${year.type === 'previous' ? 'Current' : 'Previous'} year">
                             Switch to ${year.type === 'previous' ? 'Current' : 'Previous'}
                         </button>
-                        ${years.length > 1 ? `<button class="remove-button" onclick="removeYear(${index})">Remove</button>` : ''}
+                        ${years.length > 1 ? `<button class="remove-button" onclick="removeYear(${index})" aria-label="Remove ${year.name}">Remove</button>` : ''}
                     </div>
                 `;
                 container.appendChild(item);
@@ -657,12 +961,13 @@
             categories.forEach((category, index) => {
                 const item = document.createElement('div');
                 item.className = 'item';
+                item.setAttribute('role', 'listitem');
                 item.innerHTML = `
                     <div class="item-info">
-                        <div class="item-color" style="background-color: ${category.color}"></div>
+                        <div class="item-color" style="background-color: ${category.color}" aria-label="${category.name} color"></div>
                         <span>${category.name}</span>
                     </div>
-                    ${categories.length > 1 ? `<button class="remove-button" onclick="removeCategory(${index})">Remove</button>` : ''}
+                    ${categories.length > 1 ? `<button class="remove-button" onclick="removeCategory(${index})" aria-label="Remove ${category.name} category">Remove</button>` : ''}
                 `;
                 container.appendChild(item);
             });
@@ -675,11 +980,12 @@
             functions.forEach((func, index) => {
                 const item = document.createElement('div');
                 item.className = 'sort-item';
+                item.setAttribute('role', 'listitem');
                 item.innerHTML = `
                     <span>${func.name}</span>
-                    <button onclick="moveFunctionUp(${index})" ${index === 0 ? 'disabled' : ''}>↑</button>
-                    <button onclick="moveFunctionDown(${index})" ${index === functions.length - 1 ? 'disabled' : ''}>↓</button>
-                    <button class="remove-button" onclick="removeFunction(${index})">Remove</button>
+                    <button onclick="moveFunctionUp(${index})" ${index === 0 ? 'disabled' : ''} aria-label="Move ${func.name} up">↑</button>
+                    <button onclick="moveFunctionDown(${index})" ${index === functions.length - 1 ? 'disabled' : ''} aria-label="Move ${func.name} down">↓</button>
+                    <button class="remove-button" onclick="removeFunction(${index})" aria-label="Remove ${func.name} function">Remove</button>
                 `;
                 container.appendChild(item);
             });
@@ -692,6 +998,13 @@
             functions.forEach(func => {
                 const funcDiv = document.createElement('div');
                 funcDiv.className = 'function-input';
+                funcDiv.setAttribute('role', 'group');
+                funcDiv.setAttribute('aria-labelledby', `${func.id}-title`);
+                
+                let categoryHeaders = '';
+                categories.forEach(category => {
+                    categoryHeaders += `<div class="category-header-item">${category.name}</div>`;
+                });
                 
                 let yearSections = '';
                 years.forEach(year => {
@@ -700,7 +1013,8 @@
                         const value = functionData[func.id] && functionData[func.id][year.id] ? 
                                      functionData[func.id][year.id][catIndex] || 0 : 0;
                         categoryInputs += `<input type="number" id="${func.id}-${year.id}-${category.id}" 
-                                          placeholder="${category.name}" value="${value}" min="0">`;
+                                          placeholder="${category.name}" value="${value}" min="0" 
+                                          aria-label="${category.name} for ${func.name} in ${year.name}">`;
                     });
                     
                     yearSections += `
@@ -712,7 +1026,8 @@
                 });
                 
                 funcDiv.innerHTML = `
-                    <h3>${func.name}</h3>
+                    <h3 id="${func.id}-title">${func.name}</h3>
+                    <div class="category-header">${categoryHeaders}</div>
                     ${yearSections}
                 `;
                 
@@ -742,6 +1057,7 @@
                 renderYears();
                 renderDataInput();
                 createCharts();
+                announceChange(`Added ${name} as ${type} year`);
             }
         }
         
@@ -759,6 +1075,7 @@
                 renderYears();
                 renderDataInput();
                 createCharts();
+                announceChange(`Removed ${year.name}`);
             }
         }
         
@@ -775,6 +1092,7 @@
             renderYears();
             renderDataInput();
             createCharts();
+            announceChange(`Changed ${year.name} to ${newType} year`);
         }
         
         function addCategory() {
@@ -797,11 +1115,13 @@
                 renderCategories();
                 renderDataInput();
                 createCharts();
+                announceChange(`Added ${name} category`);
             }
         }
         
         function removeCategory(index) {
             if (categories.length > 1) {
+                const categoryName = categories[index].name;
                 categories.splice(index, 1);
                 
                 functions.forEach(func => {
@@ -815,6 +1135,7 @@
                 renderCategories();
                 renderDataInput();
                 createCharts();
+                announceChange(`Removed ${categoryName} category`);
             }
         }
         
@@ -834,6 +1155,7 @@
                 renderFunctions();
                 renderDataInput();
                 createCharts();
+                announceChange(`Added ${name} function`);
             }
         }
         
@@ -846,6 +1168,7 @@
                 renderFunctions();
                 renderDataInput();
                 createCharts();
+                announceChange(`Removed ${func.name} function`);
             }
         }
         
@@ -854,6 +1177,7 @@
                 [functions[index], functions[index - 1]] = [functions[index - 1], functions[index]];
                 renderFunctions();
                 createCharts();
+                announceChange(`Moved ${functions[index - 1].name} up`);
             }
         }
         
@@ -862,6 +1186,14 @@
                 [functions[index], functions[index + 1]] = [functions[index + 1], functions[index]];
                 renderFunctions();
                 createCharts();
+                announceChange(`Moved ${functions[index + 1].name} down`);
+            }
+        }
+        
+        function announceChange(message) {
+            const announcement = document.getElementById('announcement');
+            if (announcement) {
+                announcement.textContent = message;
             }
         }
         
@@ -927,6 +1259,8 @@
             
             return sortedFunctions;
         }
+let columnSpacing = 1;
+        let categoryGap = 3;
         
         function createMainChart() {
             const ctx = document.getElementById('qaChart').getContext('2d');
@@ -936,20 +1270,39 @@
             
             if (!prevYear || !currYear) return;
             
+            // Generate labels with dynamic spacing
             const labels = [];
-            sortedFunctions.forEach(func => {
-                labels.push(`${func.name} ${prevYear.name}`);
-                labels.push(`${func.name} ${currYear.name}`);
-                labels.push('');
+            sortedFunctions.forEach((func, funcIndex) => {
+                labels.push(prevYear.name);
+                
+                // Add column spacing between years within same function
+                for (let i = 0; i < columnSpacing; i++) {
+                    labels.push('');
+                }
+                
+                labels.push(currYear.name);
+                
+                // Add category gap between different functions (except last one)
+                if (funcIndex < sortedFunctions.length - 1) {
+                    for (let i = 0; i < categoryGap; i++) {
+                        labels.push('');
+                    }
+                }
             });
-            labels.pop();
+            
+            const showDataLabels = document.getElementById('showDataLabels').checked;
+            const showValues = document.getElementById('showValues').checked;
+            const showPercentages = document.getElementById('showPercentages').checked;
+            const showTrendLine = document.getElementById('showTrendLine').checked;
             
             const datasets = categories.map((category, catIndex) => {
                 const dataPrev = [];
                 const dataCurr = [];
+                const trendDataPrev = [];
+                const trendDataCurr = [];
                 
                 let dataIndex = 0;
-                sortedFunctions.forEach(func => {
+                sortedFunctions.forEach((func, funcIndex) => {
                     const inputPrev = document.getElementById(`${func.id}-${prevYear.id}-${category.id}`);
                     const inputCurr = document.getElementById(`${func.id}-${currYear.id}-${category.id}`);
                     
@@ -962,21 +1315,44 @@
                     functionData[func.id][prevYear.id][catIndex] = valuePrev;
                     functionData[func.id][currYear.id][catIndex] = valueCurr;
                     
-                    dataPrev[dataIndex] = valuePrev;
-                    dataCurr[dataIndex + 1] = valueCurr;
-                    dataPrev[dataIndex + 2] = null;
-                    dataCurr[dataIndex + 2] = null;
+                    const totalPrev = functionData[func.id][prevYear.id].reduce((sum, val) => sum + val, 0);
+                    const totalCurr = functionData[func.id][currYear.id].reduce((sum, val) => sum + val, 0);
+                    const percPrev = totalPrev > 0 ? (valuePrev / totalPrev) * 100 : 0;
+                    const percCurr = totalCurr > 0 ? (valueCurr / totalCurr) * 100 : 0;
                     
-                    dataIndex += 3;
+                    // Previous year data
+                    dataPrev[dataIndex] = valuePrev;
+                    trendDataPrev[dataIndex] = percPrev;
+                    
+                    // Add nulls for column spacing
+                    for (let i = 1; i <= columnSpacing; i++) {
+                        dataPrev[dataIndex + i] = null;
+                        trendDataPrev[dataIndex + i] = null;
+                    }
+                    
+                    // Current year data
+                    dataCurr[dataIndex + columnSpacing + 1] = valueCurr;
+                    trendDataCurr[dataIndex + columnSpacing + 1] = percCurr;
+                    
+                    // Update dataIndex for next function
+                    dataIndex += 2 + columnSpacing;
+                    
+                    // Add nulls for category gap (except last function)
+                    if (funcIndex < sortedFunctions.length - 1) {
+                        for (let i = 0; i < categoryGap; i++) {
+                            dataPrev[dataIndex] = null;
+                            dataCurr[dataIndex] = null;
+                            trendDataPrev[dataIndex] = null;
+                            trendDataCurr[dataIndex] = null;
+                            dataIndex++;
+                        }
+                    }
                 });
-                
-                dataPrev.pop();
-                dataCurr.pop();
                 
                 const prevOpacity = getOpacity('previous');
                 const currOpacity = getOpacity('current');
                 
-                return [
+                const baseDatasets = [
                     {
                         label: `${category.name} ${prevYear.name}`,
                         data: dataPrev,
@@ -985,7 +1361,15 @@
                         borderWidth: 1,
                         borderRadius: 4,
                         borderSkipped: false,
-                        stack: 'combined'
+                        stack: 'combined',
+                        datalabels: {
+                            display: showDataLabels && showValues,
+                            anchor: 'center',
+                            align: 'center',
+                            color: '#333',
+                            font: { weight: 'bold', size: 11 },
+                            formatter: (value) => value > 0 ? value : ''
+                        }
                     },
                     {
                         label: `${category.name} ${currYear.name}`,
@@ -995,9 +1379,67 @@
                         borderWidth: 1,
                         borderRadius: 4,
                         borderSkipped: false,
-                        stack: 'combined'
+                        stack: 'combined',
+                        datalabels: {
+                            display: showDataLabels && showValues,
+                            anchor: 'center',
+                            align: 'center',
+                            color: '#333',
+                            font: { weight: 'bold', size: 11 },
+                            formatter: (value) => value > 0 ? value : ''
+                        }
                     }
                 ];
+                
+                if (showTrendLine) {
+                    baseDatasets.push({
+                        label: `${category.name} Trend ${prevYear.name}`,
+                        data: trendDataPrev,
+                        type: 'line',
+                        borderColor: category.color,
+                        backgroundColor: 'transparent',
+                        borderWidth: 2,
+                        pointRadius: 3,
+                        pointBackgroundColor: category.color,
+                        yAxisID: 'y1',
+                        datalabels: {
+                            display: showDataLabels && showPercentages,
+                            backgroundColor: 'rgba(255,255,255,0.8)',
+                            borderColor: category.color,
+                            borderRadius: 4,
+                            borderWidth: 1,
+                            color: '#333',
+                            font: { weight: 'bold', size: 10 },
+                            padding: 2,
+                            formatter: (value) => value > 0 ? value.toFixed(1) + '%' : ''
+                        }
+                    });
+                    
+                    baseDatasets.push({
+                        label: `${category.name} Trend ${currYear.name}`,
+                        data: trendDataCurr,
+                        type: 'line',
+                        borderColor: category.color,
+                        backgroundColor: 'transparent',
+                        borderWidth: 2,
+                        pointRadius: 3,
+                        pointBackgroundColor: category.color,
+                        yAxisID: 'y1',
+                        datalabels: {
+                            display: showDataLabels && showPercentages,
+                            backgroundColor: 'rgba(255,255,255,0.8)',
+                            borderColor: category.color,
+                            borderRadius: 4,
+                            borderWidth: 1,
+                            color: '#333',
+                            font: { weight: 'bold', size: 10 },
+                            padding: 2,
+                            formatter: (value) => value > 0 ? value.toFixed(1) + '%' : ''
+                        }
+                    });
+                }
+                
+                return baseDatasets;
             }).flat();
             
             const chartType = document.getElementById('chartType').value;
@@ -1010,6 +1452,11 @@
                     responsive: true,
                     maintainAspectRatio: false,
                     animation: animation,
+                    layout: {
+                        padding: {
+                            top: 30
+                        }
+                    },
                     plugins: {
                         title: {
                             display: true,
@@ -1017,17 +1464,39 @@
                             font: { size: 18, weight: 'bold' },
                             padding: 20
                         },
-                        legend: { display: false },
+                        legend: { 
+                            display: false 
+                        },
                         tooltip: {
                             callbacks: {
                                 title: function(context) {
-                                    return context[0].label || '';
+                                    const dataIndex = context[0].dataIndex;
+                                    const label = labels[dataIndex];
+                                    if (!label) return '';
+                                    
+                                    // Find which function this belongs to
+                                    let funcIndex = 0;
+                                    let currentIndex = 0;
+                                    
+                                    for (let i = 0; i < sortedFunctions.length; i++) {
+                                        if (dataIndex === currentIndex) {
+                                            return `${sortedFunctions[i].name} ${prevYear.name}`;
+                                        } else if (dataIndex === currentIndex + columnSpacing + 1) {
+                                            return `${sortedFunctions[i].name} ${currYear.name}`;
+                                        }
+                                        currentIndex += 2 + columnSpacing + (i < sortedFunctions.length - 1 ? categoryGap : 0);
+                                    }
+                                    
+                                    return label;
                                 },
                                 label: function(context) {
                                     if (context.parsed.y === null) return '';
                                     return `${context.dataset.label}: ${context.parsed.y}`;
                                 }
                             }
+                        },
+                        datalabels: {
+                            display: false
                         }
                     },
                     scales: {
@@ -1053,15 +1522,89 @@
                                 text: 'Number of Accounts',
                                 font: { size: 14, weight: 'bold' }
                             }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: showTrendLine,
+                            position: 'right',
+                            beginAtZero: true,
+                            max: 100,
+                            grid: { drawOnChartArea: false },
+                            title: {
+                                display: true,
+                                text: 'Percentage (%)',
+                                font: { size: 14, weight: 'bold' }
+                            }
                         }
                     }
-                }
+                },
+                plugins: [{
+                    afterDraw: function(chart) {
+                        const ctx = chart.ctx;
+                        const xAxis = chart.scales.x;
+                        
+                        ctx.save();
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'bottom';
+                        ctx.fillStyle = '#333';
+                        ctx.font = 'bold 14px Arial';
+                        
+                        let labelIndex = 0;
+                        sortedFunctions.forEach((func, funcIndex) => {
+                            // Calculate center position between the two year columns for this function
+                            const startPixel = xAxis.getPixelForValue(labelIndex);
+                            const endPixel = xAxis.getPixelForValue(labelIndex + columnSpacing + 1);
+                            const centerX = (startPixel + endPixel) / 2;
+                            
+                            ctx.fillText(func.name, centerX, xAxis.top - 5);
+                            
+                            // Move to next function
+                            labelIndex += 2 + columnSpacing + (funcIndex < sortedFunctions.length - 1 ? categoryGap : 0);
+                        });
+                        
+                        ctx.restore();
+                    }
+                }]
             };
             
             if (chart) chart.destroy();
             chart = new Chart(ctx, config);
             
             updateLegend();
+            updateChartAccessibility();
+        }
+        
+        function updateSpacing() {
+            columnSpacing = parseInt(document.getElementById('columnSpacing').value);
+            categoryGap = parseInt(document.getElementById('categoryGap').value);
+            
+            document.getElementById('columnSpacingValue').textContent = columnSpacing;
+            document.getElementById('categoryGapValue').textContent = categoryGap;
+            
+            createCharts();
+        }
+        
+        function updateChartAccessibility() {
+            const canvas = document.getElementById('qaChart');
+            const prevYear = getPreviousYear();
+            const currYear = getCurrentYear();
+            
+            if (!prevYear || !currYear) return;
+            
+            let description = `Chart showing quality assurance review results comparing ${prevYear.name} and ${currYear.name}. `;
+            
+            functions.forEach(func => {
+                const prevTotal = functionData[func.id][prevYear.id].reduce((sum, val) => sum + val, 0);
+                const currTotal = functionData[func.id][currYear.id].reduce((sum, val) => sum + val, 0);
+                const prevPass = functionData[func.id][prevYear.id][0] || 0;
+                const currPass = functionData[func.id][currYear.id][0] || 0;
+                const prevPassRate = prevTotal > 0 ? (prevPass / prevTotal * 100).toFixed(1) : 0;
+                const currPassRate = currTotal > 0 ? (currPass / currTotal * 100).toFixed(1) : 0;
+                
+                description += `${func.name}: ${prevYear.name} had ${prevTotal} reviews with ${prevPassRate}% pass rate, ${currYear.name} had ${currTotal} reviews with ${currPassRate}% pass rate. `;
+            });
+            
+            canvas.setAttribute('aria-label', description);
         }
         
         function createTrendChart() {
@@ -1084,8 +1627,12 @@
                     }),
                     borderColor: category.color,
                     backgroundColor: category.color + '20',
-                    borderWidth: 2,
-                    fill: false
+                    borderWidth: 3,
+                    fill: false,
+                    pointRadius: 5,
+                    pointBackgroundColor: category.color,
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 2
                 }))
             };
             
@@ -1101,7 +1648,13 @@
                             text: `Year-over-Year Percentage Point Change (${prevYear.name} to ${currYear.name})`,
                             font: { size: 16, weight: 'bold' }
                         },
-                        legend: { display: true }
+                        legend: { 
+                            display: true,
+                            labels: {
+                                usePointStyle: true,
+                                padding: 20
+                            }
+                        }
                     },
                     scales: {
                         y: {
@@ -1192,6 +1745,9 @@
             cards.forEach(card => {
                 const cardEl = document.createElement('div');
                 cardEl.className = 'trend-card';
+                cardEl.setAttribute('role', 'listitem');
+                cardEl.setAttribute('tabindex', '0');
+                cardEl.setAttribute('aria-label', `${card.title}: ${card.value}, ${card.change}`);
                 cardEl.innerHTML = `
                     <h4>${card.title}</h4>
                     <div class="value">${card.value}</div>
@@ -1237,6 +1793,9 @@
                 
                 const itemPrev = document.createElement('div');
                 itemPrev.className = 'legend-item';
+                itemPrev.setAttribute('role', 'listitem');
+                itemPrev.setAttribute('tabindex', '0');
+                itemPrev.setAttribute('aria-label', `${category.name} ${prevYear.name} data`);
                 itemPrev.innerHTML = `
                     <div class="legend-color" style="background-color: ${category.color}${prevOpacity};"></div>
                     <span>${category.name} ${prevYear.name}</span>
@@ -1245,6 +1804,9 @@
                 
                 const itemCurr = document.createElement('div');
                 itemCurr.className = 'legend-item';
+                itemCurr.setAttribute('role', 'listitem');
+                itemCurr.setAttribute('tabindex', '0');
+                itemCurr.setAttribute('aria-label', `${category.name} ${currYear.name} data`);
                 itemCurr.innerHTML = `
                     <div class="legend-color" style="background-color: ${category.color}${currOpacity};"></div>
                     <span>${category.name} ${currYear.name}</span>
@@ -1258,13 +1820,37 @@
             createTrendChart();
         }
         
+        function toggleDataLabelOptions() {
+            const showDataLabels = document.getElementById('showDataLabels').checked;
+            const options = document.getElementById('dataLabelOptions');
+            options.style.display = showDataLabels ? 'grid' : 'none';
+            
+            if (showDataLabels) {
+                options.setAttribute('aria-hidden', 'false');
+            } else {
+                options.setAttribute('aria-hidden', 'true');
+            }
+        }
+        
         function init() {
+            const announcement = document.createElement('div');
+            announcement.id = 'announcement';
+            announcement.className = 'sr-only';
+            announcement.setAttribute('aria-live', 'polite');
+            announcement.setAttribute('aria-atomic', 'true');
+            document.body.appendChild(announcement);
+            
             renderYears();
             renderCategories();
             renderFunctions();
             renderDataInput();
             createCharts();
             updatePreview();
+            toggleDataLabelOptions();
+            
+            // Initialize spacing values
+            document.getElementById('columnSpacingValue').textContent = columnSpacing;
+            document.getElementById('categoryGapValue').textContent = categoryGap;
             
             document.addEventListener('input', function(e) {
                 if (e.target.type === 'number') {
@@ -1274,6 +1860,8 @@
                     document.getElementById('currOpacityValue').textContent = document.getElementById('currOpacity').value + '%';
                     updatePreview();
                     createCharts();
+                } else if (e.target.id === 'columnSpacing' || e.target.id === 'categoryGap') {
+                    updateSpacing();
                 }
             });
             
@@ -1285,19 +1873,34 @@
                     createCharts();
                 } else if (['chartType', 'animation', 'sortBy', 'sortDirection'].includes(e.target.id)) {
                     createCharts();
+                } else if (['showDataLabels', 'showValues', 'showPercentages', 'showTrendLine'].includes(e.target.id)) {
+                    if (e.target.id === 'showDataLabels') {
+                        toggleDataLabelOptions();
+                    }
+                    createCharts();
                 }
             });
             
-            document.getElementById('newCategoryName').addEventListener('keypress', function(e) {
-                if (e.key === 'Enter') addCategory();
+            document.addEventListener('keydown', function(e) {
+                if (e.target.id === 'newCategoryName' && e.key === 'Enter') {
+                    addCategory();
+                } else if (e.target.id === 'newFunctionName' && e.key === 'Enter') {
+                    addFunction();
+                } else if (e.target.id === 'newYearName' && e.key === 'Enter') {
+                    addYear();
+                }
             });
             
-            document.getElementById('newFunctionName').addEventListener('keypress', function(e) {
-                if (e.key === 'Enter') addFunction();
+            document.addEventListener('focusin', function(e) {
+                if (e.target.matches('.function-input')) {
+                    e.target.style.borderColor = '#667eea';
+                }
             });
             
-            document.getElementById('newYearName').addEventListener('keypress', function(e) {
-                if (e.key === 'Enter') addYear();
+            document.addEventListener('focusout', function(e) {
+                if (e.target.matches('.function-input')) {
+                    e.target.style.borderColor = 'transparent';
+                }
             });
         }
         
