@@ -1981,7 +1981,18 @@
         
         // ===== CHART.JS PLUGIN REGISTRATION =====
         // Register the data labels plugin for displaying values on charts
-        Chart.register(ChartDataLabels);
+        // With this conditional registration:
+        if (typeof ChartDataLabels !== 'undefined') {
+            Chart.register(ChartDataLabels);
+        } else {
+            console.warn('ChartDataLabels plugin not available');
+            // Fallback: disable data labels
+            const showDataLabelsCheckbox = document.getElementById('showDataLabels');
+            if (showDataLabelsCheckbox) {
+                showDataLabelsCheckbox.checked = false;
+                showDataLabelsCheckbox.disabled = true;
+            }
+        }
         
         // ===== GLOBAL CHART INSTANCES =====
         // Main chart instance for the primary visualization
@@ -3160,11 +3171,16 @@
             const numValue = parseInt(value) || 0;
             setDataValue(functionId, yearId, categoryIndex, numValue);
             
-            // Update charts after data change
-            setTimeout(() => {
+            // Clear existing timeout
+            if (updateTimeout) {
+                clearTimeout(updateTimeout);
+            }
+            
+            // Throttle chart updates
+            updateTimeout = setTimeout(() => {
                 createCharts();
                 announceChange(`Updated ${getCategoryById(categories[categoryIndex].id)?.name || 'data'} for ${getFunctionById(functionId)?.name || 'function'}`);
-            }, 100);
+            }, 300); // Wait 300ms after last input
         }
         
         /**
@@ -3473,7 +3489,7 @@
         }
         
         // ===== TEXT STYLING EVENT HANDLERS =====
-        
+        /**
          * Update text style configuration and refresh charts
          * @param {string} element - Text element type (dataLabels, axisLabels, etc.)
          * @param {string} property - Style property (fontSize, color, fontWeight)
@@ -3690,6 +3706,10 @@
                 };
                 
                 exportedImages.push(exportedImage);
+                // Memory management: keep only last 10 exports
+                if (exportedImages.length > 10) {
+                    exportedImages.shift(); // Remove oldest export
+                }
                 exportCounter++;
                 
                 // Create a temporary download element to show the image was captured
@@ -4781,69 +4801,83 @@
          * Create maximized version of the main chart
          */
         function createMaximizedChart() {
-            const canvas = document.getElementById('qaChartMaximized');
-            if (!canvas) return;
-            
-            const ctx = canvas.getContext('2d');
-            const sortedFunctions = getSortedFunctions();
-            const prevYear = getPreviousYear();
-            const currYear = getCurrentYear();
-            
-            if (!prevYear || !currYear) return;
-            
-            // Use same data generation as main chart
-            const labels = generateChartLabels(sortedFunctions);
-            const showDataLabels = document.getElementById('showDataLabels')?.checked || false;
-            const showValues = document.getElementById('showValues')?.checked || false;
-            const showPercentages = document.getElementById('showPercentages')?.checked || false;
-            const showTrendLine = document.getElementById('showTrendLine')?.checked || false;
-            const chartType = document.getElementById('chartType')?.value || 'bar';
-            
-            const datasets = generateChartDatasets(
-                sortedFunctions, 
-                labels, 
-                showDataLabels, 
-                showValues, 
-                showPercentages, 
-                showTrendLine
-            );
-            
-            // Create maximized chart configuration with enhanced styling
-            const config = {
-                type: chartType,
-                data: { labels, datasets },
-                options: {
-                    ...createMainChartOptions(chartType, true, showTrendLine, prevYear, currYear),
-                    layout: {
-                        padding: {
-                            top: 60,
-                            bottom: 40,
-                            left: 20,
-                            right: showTrendLine ? 80 : 20
+            try {
+                const canvas = document.getElementById('qaChartMaximized');
+                if (!canvas) {
+                    console.warn('Maximized chart canvas not found');
+                    return;
+                }
+                
+                const ctx = canvas.getContext('2d');
+                if (!ctx) {
+                    console.error('Cannot get 2D context for maximized chart');
+                    return;
+                }
+                const sortedFunctions = getSortedFunctions();
+                const prevYear = getPreviousYear();
+                const currYear = getCurrentYear();
+                
+                if (!prevYear || !currYear) return;
+                
+                // Use same data generation as main chart
+                const labels = generateChartLabels(sortedFunctions);
+                const showDataLabels = document.getElementById('showDataLabels')?.checked || false;
+                const showValues = document.getElementById('showValues')?.checked || false;
+                const showPercentages = document.getElementById('showPercentages')?.checked || false;
+                const showTrendLine = document.getElementById('showTrendLine')?.checked || false;
+                const chartType = document.getElementById('chartType')?.value || 'bar';
+                
+                const datasets = generateChartDatasets(
+                    sortedFunctions, 
+                    labels, 
+                    showDataLabels, 
+                    showValues, 
+                    showPercentages, 
+                    showTrendLine
+                );
+                
+                // Create maximized chart configuration with enhanced styling
+                const config = {
+                    type: chartType,
+                    data: { labels, datasets },
+                    options: {
+                        ...createMainChartOptions(chartType, true, showTrendLine, prevYear, currYear),
+                        layout: {
+                            padding: {
+                                top: 60,
+                                bottom: 40,
+                                left: 20,
+                                right: showTrendLine ? 80 : 20
+                            }
+                        },
+                        plugins: {
+                            ...createMainChartOptions(chartType, true, showTrendLine, prevYear, currYear).plugins,
+                            title: {
+                                display: true,
+                                text: `Quality Assurance Review Results (${prevYear.name} vs ${currYear.name}) - Maximized View`,
+                                color: textStyles.title.color,
+                                font: {
+                                    size: Math.max(20, textStyles.title.fontSize + 4),
+                                    weight: textStyles.title.fontWeight
+                                },
+                                padding: 30
+                            }
                         }
                     },
-                    plugins: {
-                        ...createMainChartOptions(chartType, true, showTrendLine, prevYear, currYear).plugins,
-                        title: {
-                            display: true,
-                            text: `Quality Assurance Review Results (${prevYear.name} vs ${currYear.name}) - Maximized View`,
-                            color: textStyles.title.color,
-                            font: {
-                                size: Math.max(20, textStyles.title.fontSize + 4),
-                                weight: textStyles.title.fontWeight
-                            },
-                            padding: 30
-                        }
-                    }
-                },
-                plugins: [createFunctionNamePlugin(sortedFunctions, labels)]
-            };
-            
-            // Create maximized chart
-            if (maximizedChart) {
-                maximizedChart.destroy();
+                    plugins: [createFunctionNamePlugin(sortedFunctions, labels)]
+                };
+                
+                // Create maximized chart
+                if (maximizedChart) {
+                    maximizedChart.destroy();
+                }
+                maximizedChart = new Chart(ctx, config);
+            } catch (error) {
+                console.error('Error creating maximized chart:', error);
+                announceChange('Error creating maximized chart view');
+                // Fallback: close the maximized view
+                toggleChartMaximize();
             }
-            maximizedChart = new Chart(ctx, config);
         }
         
         // ===== CHART ACCESSIBILITY =====
@@ -5011,7 +5045,44 @@
             
             return JSON.stringify(dashboardState, null, 2);
         }
-        
+        function validateImportedData(data) {
+            const errors = [];
+            
+            // Check required fields
+            if (!data.configuration) {
+                errors.push('Missing configuration object');
+                return { valid: false, errors };
+            }
+            
+            const config = data.configuration;
+            
+            // Validate arrays
+            if (!Array.isArray(config.years) || config.years.length === 0) {
+                errors.push('Invalid or empty years array');
+            }
+            
+            if (!Array.isArray(config.categories) || config.categories.length === 0) {
+                errors.push('Invalid or empty categories array');
+            }
+            
+            if (!Array.isArray(config.functions) || config.functions.length === 0) {
+                errors.push('Invalid or empty functions array');
+            }
+            
+            // Validate data structure integrity
+            if (config.functionData && typeof config.functionData === 'object') {
+                for (const funcId in config.functionData) {
+                    if (!config.functions.some(f => f.id === funcId)) {
+                        errors.push(`Data exists for unknown function: ${funcId}`);
+                    }
+                }
+            }
+            
+            return {
+                valid: errors.length === 0,
+                errors: errors
+            };
+        }
         /**
          * Import dashboard configuration from JSON data
          * @param {string} jsonData - JSON string containing dashboard state
@@ -5020,7 +5091,14 @@
         function importDashboardData(jsonData) {
             try {
                 const dashboardState = JSON.parse(jsonData);
-                
+
+                // Validate before importing
+                const validation = validateImportedData(dashboardState);
+                if (!validation.valid) {
+                    console.error('Import validation failed:', validation.errors);
+                    announceChange('Import failed: ' + validation.errors.join(', '));
+                    return false;
+                }                
                 // Validate data structure
                 if (!dashboardState.configuration) {
                     throw new Error('Invalid data format: missing configuration');
