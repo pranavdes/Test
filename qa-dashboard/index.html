@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <!-- Meta tags for character encoding and responsive design -->
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Quality Assurance Review Analytics Dashboard - Comprehensive analysis tool for QA review results">
+    <meta name="keywords" content="QA, Quality Assurance, Analytics, Dashboard, Review Analysis">
+    <meta name="author" content="QA Analytics Team">
+    
+    <!-- Page title -->
+    <title>Enhanced QA Review Analytics Dashboard</title>
+    
+    <!-- External library imports -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-datalabels/2.2.0/chartjs-plugin-datalabels.min.js"></script>
+    
+    <!-- CSS Imports in loading order -->
+    <link rel="stylesheet" href="css/main.css">
+    <link rel="stylesheet" href="css/components.css">
+    <link rel="stylesheet" href="css/charts.css">
+    <link rel="stylesheet" href="css/sidebar.css">
+    <link rel="stylesheet" href="css/responsive.css">
+    <link rel="stylesheet" href="css/accessibility.css">
+    
+    <!-- Preload critical resources -->
+    <link rel="preload" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" as="style" onload="this.onload=null;this.rel='stylesheet'">
+    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap"></noscript>
+</head>
+<body>
+    <!-- Skip navigation link for accessibility -->
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+    
+    <!-- Main container wrapper for the entire dashboard -->
+    <div class="container" id="mainContainer">
+        
+        <!-- Header section with title and description -->
+        <header class="header">
+            <h1>Enhanced QA Review Analytics Dashboard</h1>
+            <p>Fully Customizable Review Analysis with Advanced Styling & Export Options</p>
+        </header>
+        
+        <!-- Main dashboard grid layout container -->
+        <div class="dashboard" id="dashboardGrid">
+            
+            <!-- Main content area containing charts and controls -->
+            <main id="main-content" class="main-content">
+                
+                <!-- Top control bar for basic chart settings -->
+                <section class="controls" role="region" aria-label="Chart Controls" tabindex="0">
+                    
+                    <!-- Chart type selection -->
+                    <div class="control-group">
+                        <label for="chartType">Chart Type</label>
+                        <select id="chartType" aria-describedby="chartType-help">
+                            <option value="bar">Stacked Column</option>
+                            <option value="horizontalBar">Stacked Bar</option>
+                        </select>
+                        <div id="chartType-help" class="sr-only">Choose between vertical or horizontal stacked chart display</div>
+                    </div>
+                    
+                    <!-- Animation toggle -->
+                    <div class="control-group">
+                        <label for="animation">Animation</label>
+                        <select id="animation" aria-describedby="animation-help">
+                            <option value="true">Enabled</option>
+                            <option value="false">Disabled</option>
+                        </select>
+                        <div id="animation-help" class="sr-only">Enable or disable chart animations for better accessibility</div>
+                    </div>
+                    
+                    <!-- Sorting options -->
+                    <div class="control-group">
+                        <label for="sortBy">Sort By</label>
+                        <select id="sortBy" aria-describedby="sortBy-help">
+                            <option value="default">Default Order</option>
+                            <option value="name">Function Name</option>
+                            <option value="totalPrevious">Previous Year Total</option>
+                            <option value="totalCurrent">Current Year Total</option>
+                            <option value="improvement">Improvement Rate</option>
+                            <option value="passRateCurrent">Current Year Pass Rate</option>
+                        </select>
+                        <div id="sortBy-help" class="sr-only">Choose how to sort functions in the chart</div>
+                    </div>
+                    
+                    <!-- Sort direction -->
+                    <div class="control-group">
+                        <label for="sortDirection">Sort Direction</label>
+                        <select id="sortDirection" aria-describedby="sortDirection-help">
+                            <option value="asc">Ascending</option>
+                            <option value="desc">Descending</option>
+                        </select>
+                        <div id="sortDirection-help" class="sr-only">Choose ascending or descending sort order</div>
+                    </div>
+                    
+                    <!-- Quick function addition -->
+                    <div class="control-group">
+                        <label for="newFunctionName">Add Function</label>
+                        <input type="text" id="newFunctionName" placeholder="Function name" aria-describedby="newFunction-help">
+                        <div id="newFunction-help" class="sr-only">Enter a new function name to add to the analysis</div>
+                    </div>
+                    
+                    <!-- Add function button -->
+                    <div class="control-group">
+                        <label>&nbsp;</label>
+                        <button onclick="addFunction()" aria-describedby="addFunction-help">Add Function</button>
+                        <div id="addFunction-help" class="sr-only">Click to add the new function to the dashboard</div>
+                    </div>
+                    
+                    <!-- Chart view controls -->
+                    <div class="control-group">
+                        <label for="maximizeChart">Chart View</label>
+                        <button id="maximizeChart" onclick="toggleChartMaximize()" aria-describedby="maximize-help">
+                            Maximize Chart
+                        </button>
+                        <div id="maximize-help" class="sr-only">Expand chart to full viewport size</div>
+                    </div>
+                    
+                    <!-- Export functionality -->
+                    <div class="control-group">
+                        <label for="exportChart">Export</label>
+                        <button id="exportChart" onclick="exportChartImage()" aria-describedby="export-help">
+                            Take Snapshot
+                        </button>
+                        <div id="export-help" class="sr-only">Capture chart as image and store in memory</div>
+                    </div>
+                </section>
+                
+                <!-- Main chart container with maximize overlay capability -->
+                <section class="chart-container" id="chartContainer" role="region" aria-label="Main Chart" tabindex="0">
+                    <!-- Chart maximize overlay (hidden by default) -->
+                    <div class="chart-maximize-overlay" id="chartMaximizeOverlay" style="display: none;">
+                        <div class="maximize-header">
+                            <h3>Chart Maximized View</h3>
+                            <button class="close-maximize" onclick="toggleChartMaximize()" aria-label="Close maximized view">×</button>
+                        </div>
+                        <div class="maximize-chart-wrapper">
+                            <canvas id="qaChartMaximized" role="img" aria-label="Maximized Quality Assurance Review Results Chart"></canvas>
+                        </div>
+                    </div>
+                    
+                    <!-- Regular chart canvas -->
+                    <canvas id="qaChart" role="img" aria-label="Quality Assurance Review Results Chart"></canvas>
+                    
+                    <!-- Custom legend container -->
+                    <div class="legend-custom" id="legendContainer" role="list" aria-label="Chart Legend"></div>
+                </section>
+                
+                <!-- Data input form section -->
+                <section class="data-input" id="dataInputContainer" role="region" aria-label="Data Input Form" tabindex="0"></section>
+            </main>
+            
+            <!-- Sidebar for configuration options -->
+            <aside class="sidebar" role="complementary" aria-label="Configuration Panel">
+                
+                <!-- Years management section -->
+                <div class="section-header">Years Configuration</div>
+                <div class="add-item">
+                    <input type="text" id="newYearName" placeholder="Year (e.g., 2023)" aria-label="New Year Name">
+                    <select id="yearType" aria-label="Year Type">
+                        <option value="previous">Previous</option>
+                        <option value="current">Current</option>
+                    </select>
+                    <button onclick="addYear()">Add Year</button>
+                </div>
+                <div id="yearsList" role="list" aria-label="Years List"></div>
+                
+                <!-- Axis controls section -->
+                <div class="section-header">Axis Controls</div>
+                <div class="axis-controls">
+                    <!-- Primary Y-axis (Accounts) controls -->
+                    <div class="axis-section">
+                        <h4>Primary Axis (Number of Accounts)</h4>
+                        <div class="axis-control-group">
+                            <div class="axis-control">
+                                <label for="primaryAxisMin">Min Value</label>
+                                <input type="number" id="primaryAxisMin" placeholder="Auto" aria-label="Primary axis minimum value">
+                                <div class="checkbox-item">
+                                    <input type="checkbox" id="primaryAxisAutoMin" checked>
+                                    <label for="primaryAxisAutoMin">Auto</label>
+                                </div>
+                            </div>
+                            <div class="axis-control">
+                                <label for="primaryAxisMax">Max Value</label>
+                                <input type="number" id="primaryAxisMax" placeholder="Auto" aria-label="Primary axis maximum value">
+                                <div class="checkbox-item">
+                                    <input type="checkbox" id="primaryAxisAutoMax" checked>
+                                    <label for="primaryAxisAutoMax">Auto</label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Secondary Y-axis (Percentage) controls -->
+                    <div class="axis-section">
+                        <h4>Secondary Axis (Percentage %)</h4>
+                        <div class="axis-control-group">
+                            <div class="axis-control">
+                                <label for="secondaryAxisMin">Min Value</label>
+                                <input type="number" id="secondaryAxisMin" value="0" min="0" max="100" aria-label="Secondary axis minimum value">
+                                <div class="checkbox-item">
+                                    <input type="checkbox" id="secondaryAxisAutoMin">
+                                    <label for="secondaryAxisAutoMin">Auto</label>
+                                </div>
+                            </div>
+                            <div class="axis-control">
+                                <label for="secondaryAxisMax">Max Value</label>
+                                <input type="number" id="secondaryAxisMax" value="100" min="0" max="100" aria-label="Secondary axis maximum value">
+                                <div class="checkbox-item">
+                                    <input type="checkbox" id="secondaryAxisAutoMax">
+                                    <label for="secondaryAxisAutoMax">Auto</label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Chart spacing controls -->
+                <div class="section-header">Chart Spacing</div>
+                <div class="spacing-controls">
+                    <div class="spacing-control">
+                        <label for="columnSpacing">Column Spacing: <span class="value-display" id="columnSpacingValue">1</span></label>
+                        <input type="range" id="columnSpacing" min="0" max="5" value="1" aria-describedby="columnSpacing-help">
+                        <div id="columnSpacing-help" class="spacing-description">Adjust space between year columns within each function</div>
+                    </div>
+                    <div class="spacing-control">
+                        <label for="categoryGap">Category Gap: <span class="value-display" id="categoryGapValue">3</span></label>
+                        <input type="range" id="categoryGap" min="1" max="8" value="3" aria-describedby="categoryGap-help">
+                        <div id="categoryGap-help" class="spacing-description">Adjust gap between different function categories</div>
+                    </div>
+                </div>
+                
+                <!-- Text styling section -->
+                <div class="section-header">Text Styling</div>
+                <div class="text-styling-controls">
+                    <!-- Data labels text styling -->
+                    <div class="text-style-group">
+                        <h4>Data Labels</h4>
+                        <div class="style-controls">
+                            <div class="style-control">
+                                <label for="dataLabelFontSize">Font Size: <span id="dataLabelFontSizeValue">11px</span></label>
+                                <input type="range" id="dataLabelFontSize" min="8" max="20" value="11">
+                            </div>
+                            <div class="style-control">
+                                <label for="dataLabelColor">Color:</label>
+                                <input type="color" id="dataLabelColor" value="#333333">
+                            </div>
+                            <div class="style-control">
+                                <label for="dataLabelWeight">Font Weight:</label>
+                                <select id="dataLabelWeight">
+                                    <option value="normal">Normal</option>
+                                    <option value="bold" selected>Bold</option>
+                                    <option value="lighter">Light</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Axis labels text styling -->
+                    <div class="text-style-group">
+                        <h4>Axis Labels</h4>
+                        <div class="style-controls">
+                            <div class="style-control">
+                                <label for="axisLabelFontSize">Font Size: <span id="axisLabelFontSizeValue">12px</span></label>
+                                <input type="range" id="axisLabelFontSize" min="8" max="18" value="12">
+                            </div>
+                            <div class="style-control">
+                                <label for="axisLabelColor">Color:</label>
+                                <input type="color" id="axisLabelColor" value="#666666">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Function names text styling -->
+                    <div class="text-style-group">
+                        <h4>Function Names</h4>
+                        <div class="style-controls">
+                            <div class="style-control">
+                                <label for="functionNameFontSize">Font Size: <span id="functionNameFontSizeValue">14px</span></label>
+                                <input type="range" id="functionNameFontSize" min="10" max="20" value="14">
+                            </div>
+                            <div class="style-control">
+                                <label for="functionNameColor">Color:</label>
+                                <input type="color" id="functionNameColor" value="#333333">
+                            </div>
+                            <div class="style-control">
+                                <label for="functionNameWeight">Font Weight:</label>
+                                <select id="functionNameWeight">
+                                    <option value="normal">Normal</option>
+                                    <option value="bold" selected>Bold</option>
+                                    <option value="lighter">Light</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Category labels text styling -->
+                    <div class="text-style-group">
+                        <h4>Category Labels</h4>
+                        <div class="style-controls">
+                            <div class="style-control">
+                                <label for="categoryLabelFontSize">Font Size: <span id="categoryLabelFontSizeValue">12px</span></label>
+                                <input type="range" id="categoryLabelFontSize" min="8" max="18" value="12">
+                            </div>
+                            <div class="style-control">
+                                <label for="categoryLabelColor">Color:</label>
+                                <input type="color" id="categoryLabelColor" value="#333333">
+                            </div>
+                            <div class="style-control">
+                                <label for="categoryLabelWeight">Font Weight:</label>
+                                <select id="categoryLabelWeight">
+                                    <option value="normal" selected>Normal</option>
+                                    <option value="bold">Bold</option>
+                                    <option value="lighter">Light</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Data labels display options -->
+                <div class="section-header">Data Labels</div>
+                <div class="data-labels-section">
+                    <div class="checkbox-item">
+                        <input type="checkbox" id="showDataLabels" checked>
+                        <label for="showDataLabels">Show Data Labels</label>
+                    </div>
+                    <div class="checkbox-group" id="dataLabelOptions">
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="showValues" checked>
+                            <label for="showValues">Values</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="showPercentages">
+                            <label for="showPercentages">Percentages</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="showTrendLine" checked>
+                            <label for="showTrendLine">Trend Lines</label>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Trend line configuration -->
+                <div class="section-header">Trend Line Configuration</div>
+                <div class="trendline-controls" id="trendlineControls">
+                    <!-- Dynamic trend line controls will be generated here -->
+                </div>
+                
+                <!-- Shading options -->
+                <div class="section-header">Shading Options</div>
+                <div class="shading-controls">
+                    <div class="shading-option">
+                        <input type="radio" id="shadingAuto" name="shading" value="auto" checked>
+                        <label for="shadingAuto">Auto (Previous=Light, Current=Dark)</label>
+                    </div>
+                    <div class="shading-option">
+                        <input type="radio" id="shadingManual" name="shading" value="manual">
+                        <label for="shadingManual">Manual Opacity Control</label>
+                    </div>
+                    <div id="manualOpacityControls" style="display: none;">
+                        <label for="prevOpacity">Previous Year Opacity: <span id="prevOpacityValue">50%</span></label>
+                        <input type="range" id="prevOpacity" min="10" max="100" value="50" style="width: 100%;" aria-describedby="prevOpacity-help">
+                        <div id="prevOpacity-help" class="sr-only">Adjust opacity for previous year data from 10% to 100%</div>
+                        <label for="currOpacity">Current Year Opacity: <span id="currOpacityValue">100%</span></label>
+                        <input type="range" id="currOpacity" min="10" max="100" value="100" style="width: 100%;" aria-describedby="currOpacity-help">
+                        <div id="currOpacity-help" class="sr-only">Adjust opacity for current year data from 10% to 100%</div>
+                    </div>
+                    <div class="shading-preview">
+                        <span>Preview:</span>
+                        <div class="preview-box" id="prevPreview" style="background-color: #4CAF5080;" aria-label="Previous year color preview"></div>
+                        <div class="preview-box" id="currPreview" style="background-color: #4CAF50;" aria-label="Current year color preview"></div>
+                    </div>
+                </div>
+                
+                <!-- Categories management -->
+                <div class="section-header">Categories</div>
+                <div class="add-item">
+                    <input type="text" id="newCategoryName" placeholder="Category name" aria-label="New Category Name">
+                    <input type="color" id="newCategoryColor" value="#2196F3" aria-label="Category Color">
+                    <button onclick="addCategory()">Add Category</button>
+                </div>
+                <div id="categoriesList" role="list" aria-label="Categories List"></div>
+                
+                <!-- Functions management -->
+                <div class="section-header">Functions</div>
+                <div class="sorting-controls" id="functionsList" role="list" aria-label="Functions List"></div>
+            </aside>
+        </div>
+    </div>
+    
+    <!-- Hidden elements for accessibility announcements -->
+    <div id="announcement" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+    
+    <!-- Image storage container for exported charts -->
+    <div id="imageStorage" style="display: none;" aria-hidden="true"></div>
+    
+    <!-- JavaScript imports in loading order -->
+    <!-- Core modules -->
+    <script src="js/core/config.js"></script>
+    <script src="js/core/utils.js"></script>
+    <script src="js/core/data-manager.js"></script>
+    
+    <!-- UI modules -->
+    <script src="js/ui/components.js"></script>
+    <script src="js/ui/renderer.js"></script>
+    
+    <!-- Chart modules -->
+    <script src="js/charts/chart-builder.js"></script>
+    <script src="js/charts/chart-interactions.js"></script>
+    <script src="js/charts/chart-exports.js"></script>
+    
+    <!-- Feature modules -->
+    <script src="js/features/import-export.js"></script>
+    <script src="js/features/themes.js"></script>
+    <script src="js/features/accessibility.js"></script>
+    <script src="js/features/tour.js"></script>
+    
+    <!-- Event handlers and main app -->
+    <script src="js/ui/event-handlers.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
