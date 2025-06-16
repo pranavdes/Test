@@ -1,0 +1,15 @@
+# Teams Monitoring User List
+# Add one email address per line
+# Lines starting with # are treated as comments and ignored
+# Empty lines are also ignored
+
+# Primary employee under review
+john.doe@company.com
+
+# Additional employees to monitor (uncomment as needed)
+# jane.smith@company.com
+# mike.wilson@company.com
+
+# You can add as many email addresses as needed
+# employee4@company.com
+# employee5@company.com
