@@ -4,8 +4,8 @@ REM Supports multiple users and continuous monitoring
 
 REM Configuration
 set CHECK_INTERVAL=15
-set LOG_PATH=C:\TeamsMonitoring
-set USER_LIST_FILE=%LOG_PATH%\users.txt
+set "LOG_PATH=C:\Teams Monitoring Logs"
+set "USER_LIST_FILE=%LOG_PATH%\users.txt"
 
 REM For continuous monitoring (24/7), use these settings:
 set START_TIME=00:00
@@ -27,7 +27,7 @@ if not exist "%USER_LIST_FILE%" (
     echo # employee1@company.com >> "%USER_LIST_FILE%"
     echo # employee2@company.com >> "%USER_LIST_FILE%"
     echo. >> "%USER_LIST_FILE%"
-    echo Please edit %USER_LIST_FILE% and add the email addresses to monitor
+    echo Please edit "%USER_LIST_FILE%" and add the email addresses to monitor
     pause
     exit /b
 )
@@ -35,11 +35,11 @@ if not exist "%USER_LIST_FILE%" (
 echo ================================================================
 echo Enhanced Teams Status Monitor
 echo ================================================================
-echo User List File: %USER_LIST_FILE%
+echo User List File: "%USER_LIST_FILE%"
 echo Check Interval: Every %CHECK_INTERVAL% minutes
 echo Monitoring Hours: %START_TIME% to %END_TIME%
 if defined CONTINUOUS_MODE echo Mode: Continuous (24/7)
-echo Log Directory: %LOG_PATH%
+echo Log Directory: "%LOG_PATH%"
 echo.
 echo Starting monitoring...
 echo.
