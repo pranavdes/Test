@@ -106,3 +106,26 @@ let
                 error "SharePoint connection failed after 3 attempts. List: " & listName & " | URL: " & ODataUrl & " | Error: " & Attempt3[Error][Message]
 in
     Result
+
+
+// Fastest implentation
+(tenant_name,site_name,list_name)=>
+let
+    tenantname = tenant_name,
+    sitename = site_name, // if a subsite use "Site/SubSite"
+    listname = list_name,
+    baseurl = "https://" & tenantname & "/sites/" & sitename & "/_api/web/lists/GetByTitle('" & listname & "')/",
+    itemcount = Json.Document(Web.Contents(baseurl&"ItemCount", [Headers=[Accept="application/json"]]))[value],
+    skiplist = List.Numbers(0, Number.RoundUp(itemcount/5000), 5000),
+    #"Converted to Table" = Table.FromList(skiplist, Splitter.SplitByNothing(), null, null, ExtraValues.Error),
+    #"Renamed Columns" = Table.RenameColumns(#"Converted to Table",{{"Column1", "Skip"}}),
+    #"Changed Type" = Table.TransformColumnTypes(#"Renamed Columns",{{"Skip", type text}}),
+    fieldselect = "&$top=5000", // all fields with no expansion
+    //fieldselect = "&$top=5000&$select = Id,Title,Person,Date", // list desired fields (no expansion)
+    //fieldselect = "&$top=5000&$select = Id,Title,Person/LastName,Person/FirstName,Date&$expand = Person", //expand list fields
+    #"Added Custom" = Table.AddColumn(#"Changed Type", "Items", each Json.Document(Web.Contents(baseurl& "/items?$skipToken=Paged=TRUE%26p_ID=" & [Skip] & fieldselect, [Headers=[Accept="application/json"]]))),
+    #"Expanded Items" = Table.ExpandRecordColumn(#"Added Custom", "Items", {"value"}, {"value"}),
+    #"Expanded value" = Table.ExpandListColumn(#"Expanded Items", "value")
+    
+in
+    #"Expanded value"
