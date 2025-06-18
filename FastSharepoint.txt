@@ -456,14 +456,15 @@ in
     FinalTable
 ------------------------------------------------------------------------------------
 // =================================================================================
-// ENHANCED FUNCTION WITH SMART COMPLEX FIELD HANDLING - FIXED
+// SHAREPOINT FUNCTION WITH AUTO DRILL-DOWN THROUGH "VALUE" COLUMNS
 // =================================================================================
-// Create this as: GetSharePointListSmart
+// This function automatically expands "value" columns until it reaches actual data
+// Create this as: GetSharePointListAutoDrill
 
-(siteUrl as text, listName as text, optional filter as text, optional selectColumns as list, optional autoExpandComplex as logical, optional pageSize as number) as table =>
+(siteUrl as text, listName as text, optional filter as text, optional selectColumns as list, optional expandColumns as list, optional pageSize as number) as table =>
 let
+    // Set defaults
     DefaultPageSize = if pageSize = null then 5000 else pageSize,
-    AutoExpand = if autoExpandComplex = null then true else autoExpandComplex,
     CleanSiteUrl = if Text.EndsWith(siteUrl, "/") then Text.RemoveRange(siteUrl, Text.Length(siteUrl)-1) else siteUrl,
     BaseUrl = CleanSiteUrl & "/_api/web/lists/GetByTitle('" & listName & "')/",
     
@@ -485,17 +486,51 @@ let
         in
             DecodedName,
     
+    // Function to automatically drill down through "value" columns
+    DrillDownThroughValues = (inputTable as table) as table =>
+        let
+            // Check if table has "value" column
+            ColumnNames = Table.ColumnNames(inputTable),
+            HasValueColumn = List.Contains(ColumnNames, "value"),
+            
+            ProcessedTable = if HasValueColumn then
+                let
+                    // Expand the "value" column
+                    ExpandedTable = try Table.ExpandListColumn(inputTable, "value") otherwise inputTable,
+                    
+                    // Remove other columns if they exist (keep only the expanded data)
+                    CleanedTable = if Table.HasColumns(ExpandedTable, {"value"}) then
+                        Table.SelectColumns(ExpandedTable, {"value"})
+                    else 
+                        ExpandedTable,
+                    
+                    // Recursively check for more "value" columns
+                    FinalTable = if Table.HasColumns(CleanedTable, {"value"}) then
+                        DrillDownThroughValues(CleanedTable)
+                    else
+                        CleanedTable
+                in
+                    FinalTable
+            else
+                inputTable
+        in
+            ProcessedTable,
+    
     // Build query parameters
     FilterClause = if filter = null then "" else "&$filter=" & filter,
-    SelectClause = if selectColumns = null then "" else "&$select=" & Text.Combine(selectColumns, ","),
-    FieldSelect = "&$top=" & Text.From(DefaultPageSize) & FilterClause & SelectClause,
+    SelectClause = if selectColumns = null then "" 
+                  else "&$select=" & Text.Combine(selectColumns, ",") & 
+                       (if expandColumns = null then "" else "," & Text.Combine(expandColumns, ",")),
+    ExpandClause = if expandColumns = null then "" else "&$expand=" & Text.Combine(expandColumns, ","),
+    FieldSelect = "&$top=" & Text.From(DefaultPageSize) & FilterClause & SelectClause & ExpandClause,
     
-    // Get item count
+    // Get total item count
     ItemCountUrl = BaseUrl & "ItemCount" & (if filter = null then "" else "?$filter=" & filter),
     ItemCount = Json.Document(Web.Contents(ItemCountUrl, [Headers=[Accept="application/json"]]))[value],
     
     // Get raw data with pagination
     RawData = if ItemCount <= DefaultPageSize then
+        // Single page
         let
             SinglePageUrl = BaseUrl & "items?" & Text.RemoveRange(FieldSelect, 0, 1),
             SinglePageData = Json.Document(Web.Contents(SinglePageUrl, [Headers=[Accept="application/json"]])),
@@ -503,6 +538,7 @@ let
         in
             SinglePageTable
     else
+        // Multi-page pagination
         let
             SkipList = List.Numbers(0, Number.RoundUp(ItemCount/DefaultPageSize), DefaultPageSize),
             SkipTable = Table.FromList(SkipList, Splitter.SplitByNothing(), null, null, ExtraValues.Error),
@@ -520,63 +556,14 @@ let
         in
             CleanedData,
     
-    // Analyze and handle complex fields
-    ProcessedData = if AutoExpand and Table.RowCount(RawData) > 0 then
-        let
-            // Get sample row to analyze field types
-            SampleRow = Table.FirstN(RawData, 1),
-            ColumnNames = Table.ColumnNames(RawData),
-            
-            // Identify complex columns that need expansion using correct type checking
-            ComplexColumns = List.Select(ColumnNames, each
-                let
-                    SampleValue = Table.Column(SampleRow, _){0}?,
-                    IsRecord = SampleValue is record,
-                    IsList = SampleValue is list
-                in
-                    IsRecord or IsList
-            ),
-            
-            // Expand record columns (like lookup fields)
-            ExpandRecordColumns = List.Accumulate(
-                ComplexColumns,
-                RawData,
-                (currentTable, columnName) =>
-                    let
-                        SampleValue = Table.Column(Table.FirstN(currentTable, 1), columnName){0}?,
-                        IsRecord = SampleValue is record,
-                        IsList = SampleValue is list
-                    in
-                        if IsRecord then
-                            try 
-                                let
-                                    // For lookup fields, try to expand common properties
-                                    ExpandedTable = Table.ExpandRecordColumn(currentTable, columnName, 
-                                        {"Id", "Title", "EMail", "Name"}, 
-                                        {columnName & ".Id", columnName & ".Title", columnName & ".EMail", columnName & ".Name"}
-                                    )
-                                in
-                                    ExpandedTable
-                            otherwise currentTable
-                        else if IsList then
-                            try
-                                // For multi-value fields, convert to text
-                                Table.TransformColumns(currentTable, {{columnName, each 
-                                    if _ = null then null
-                                    else if _ is list then Text.Combine(List.Transform(_, Text.From), "; ")
-                                    else Text.From(_)
-                                }})
-                            otherwise currentTable
-                        else currentTable
-            )
-        in
-            ExpandRecordColumns
-    else RawData,
+    // Auto drill down through any "value" columns
+    DrilledData = DrillDownThroughValues(RawData),
     
     // Decode column names
-    OriginalColumnNames = Table.ColumnNames(ProcessedData),
+    OriginalColumnNames = Table.ColumnNames(DrilledData),
     DecodedColumnNames = List.Transform(OriginalColumnNames, each DecodeFieldName(_)),
     
+    // Create renaming pairs (only if names actually changed)
     RenamingPairs = List.Transform(
         List.Positions(OriginalColumnNames),
         each if OriginalColumnNames{_} <> DecodedColumnNames{_} 
@@ -584,10 +571,12 @@ let
              else null
     ),
     
+    // Filter out null entries
     ActualRenamingPairs = List.RemoveNulls(RenamingPairs),
     
+    // Apply column renaming
     FinalTable = if List.Count(ActualRenamingPairs) > 0 
-                 then Table.RenameColumns(ProcessedData, ActualRenamingPairs)
-                 else ProcessedData
+                 then Table.RenameColumns(DrilledData, ActualRenamingPairs)
+                 else DrilledData
 in
     FinalTable
