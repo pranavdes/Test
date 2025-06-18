@@ -454,3 +454,143 @@ let
                  else RawData
 in
     FinalTable
+------------------------------------------------------------------------------------
+
+
+// =================================================================================
+// ENHANCED FUNCTION WITH SMART COMPLEX FIELD HANDLING
+// =================================================================================
+// This version attempts to automatically handle complex fields
+// Create this as: GetSharePointListSmart
+
+(siteUrl as text, listName as text, optional filter as text, optional selectColumns as list, optional autoExpandComplex as logical, optional pageSize as number) as table =>
+let
+    DefaultPageSize = if pageSize = null then 5000 else pageSize,
+    AutoExpand = if autoExpandComplex = null then true else autoExpandComplex,
+    CleanSiteUrl = if Text.EndsWith(siteUrl, "/") then Text.RemoveRange(siteUrl, Text.Length(siteUrl)-1) else siteUrl,
+    BaseUrl = CleanSiteUrl & "/_api/web/lists/GetByTitle('" & listName & "')/",
+    
+    // Field name decoding function
+    DecodeFieldName = (encodedName as text) as text =>
+        let
+            DecodingSteps = {
+                {"_x0020_", " "}, {"_x0027_", "'"}, {"_x0028_", "("}, {"_x0029_", ")"}, 
+                {"_x002d_", "-"}, {"_x002e_", "."}, {"_x003a_", ":"}, {"_x003b_", ";"}, 
+                {"_x003c_", "<"}, {"_x003e_", ">"}, {"_x003f_", "?"}, {"_x0040_", "@"}, 
+                {"_x005b_", "["}, {"_x005c_", "\"}, {"_x005d_", "]"}, {"_x007b_", "{"}, 
+                {"_x007c_", "|"}, {"_x007d_", "}"}, {"_x00a0_", " "}, {"_x0023_", "#"}, 
+                {"_x0024_", "$"}, {"_x0025_", "%"}, {"_x0026_", "&"}, {"_x002a_", "*"}, 
+                {"_x002b_", "+"}, {"_x002c_", ","}, {"_x002f_", "/"}, {"_x003d_", "="}, 
+                {"_x005e_", "^"}, {"_x0060_", "`"}, {"_x007e_", "~"}
+            },
+            DecodedName = List.Accumulate(DecodingSteps, encodedName, 
+                (current, mapping) => Text.Replace(current, mapping{0}, mapping{1}))
+        in
+            DecodedName,
+    
+    // Build query parameters
+    FilterClause = if filter = null then "" else "&$filter=" & filter,
+    SelectClause = if selectColumns = null then "" else "&$select=" & Text.Combine(selectColumns, ","),
+    FieldSelect = "&$top=" & Text.From(DefaultPageSize) & FilterClause & SelectClause,
+    
+    // Get item count
+    ItemCountUrl = BaseUrl & "ItemCount" & (if filter = null then "" else "?$filter=" & filter),
+    ItemCount = Json.Document(Web.Contents(ItemCountUrl, [Headers=[Accept="application/json"]]))[value],
+    
+    // Get raw data with pagination
+    RawData = if ItemCount <= DefaultPageSize then
+        let
+            SinglePageUrl = BaseUrl & "items?" & Text.RemoveRange(FieldSelect, 0, 1),
+            SinglePageData = Json.Document(Web.Contents(SinglePageUrl, [Headers=[Accept="application/json"]])),
+            SinglePageTable = Table.FromRecords(SinglePageData[value])
+        in
+            SinglePageTable
+    else
+        let
+            SkipList = List.Numbers(0, Number.RoundUp(ItemCount/DefaultPageSize), DefaultPageSize),
+            SkipTable = Table.FromList(SkipList, Splitter.SplitByNothing(), null, null, ExtraValues.Error),
+            RenamedSkipTable = Table.RenameColumns(SkipTable, {{"Column1", "Skip"}}),
+            SkipTableTyped = Table.TransformColumnTypes(RenamedSkipTable, {{"Skip", type text}}),
+            
+            PaginatedData = Table.AddColumn(SkipTableTyped, "Items", each 
+                Json.Document(Web.Contents(BaseUrl & "items?$skipToken=Paged=TRUE%26p_ID=" & [Skip] & FieldSelect, 
+                [Headers=[Accept="application/json"]]))
+            ),
+            
+            ExpandedItems = Table.ExpandRecordColumn(PaginatedData, "Items", {"value"}, {"value"}),
+            ExpandedValues = Table.ExpandListColumn(ExpandedItems, "value"),
+            CleanedData = Table.RemoveColumns(ExpandedValues, {"Skip"})
+        in
+            CleanedData,
+    
+    // Analyze and handle complex fields
+    ProcessedData = if AutoExpand and Table.RowCount(RawData) > 0 then
+        let
+            // Get sample row to analyze field types
+            SampleRow = Table.FirstN(RawData, 1),
+            ColumnNames = Table.ColumnNames(RawData),
+            
+            // Identify complex columns that need expansion
+            ComplexColumns = List.Select(ColumnNames, each
+                let
+                    SampleValue = Table.Column(SampleRow, _){0}?,
+                    ValueType = Value.Type(SampleValue),
+                    TypeName = Type.ToText(ValueType)
+                in
+                    TypeName = "type record" or TypeName = "type list"
+            ),
+            
+            // Expand record columns (like lookup fields)
+            ExpandRecordColumns = List.Accumulate(
+                ComplexColumns,
+                RawData,
+                (currentTable, columnName) =>
+                    let
+                        SampleValue = Table.Column(Table.FirstN(currentTable, 1), columnName){0}?,
+                        ValueType = Value.Type(SampleValue),
+                        TypeName = Type.ToText(ValueType)
+                    in
+                        if TypeName = "type record" then
+                            try 
+                                let
+                                    // For lookup fields, typically expand common properties
+                                    ExpandedTable = Table.ExpandRecordColumn(currentTable, columnName, 
+                                        {"Id", "Title", "EMail", "Name"}, 
+                                        {columnName & ".Id", columnName & ".Title", columnName & ".EMail", columnName & ".Name"}
+                                    )
+                                in
+                                    ExpandedTable
+                            otherwise currentTable
+                        else if TypeName = "type list" then
+                            try
+                                // For multi-value fields, convert to text
+                                Table.TransformColumns(currentTable, {{columnName, each 
+                                    if _ = null then null
+                                    else if Value.Type(_) = type list then Text.Combine(List.Transform(_, Text.From), "; ")
+                                    else Text.From(_)
+                                }})
+                            otherwise currentTable
+                        else currentTable
+            )
+        in
+            ExpandRecordColumns
+    else RawData,
+    
+    // Decode column names
+    OriginalColumnNames = Table.ColumnNames(ProcessedData),
+    DecodedColumnNames = List.Transform(OriginalColumnNames, each DecodeFieldName(_)),
+    
+    RenamingPairs = List.Transform(
+        List.Positions(OriginalColumnNames),
+        each if OriginalColumnNames{_} <> DecodedColumnNames{_} 
+             then {OriginalColumnNames{_}, DecodedColumnNames{_}}
+             else null
+    ),
+    
+    ActualRenamingPairs = List.RemoveNulls(RenamingPairs),
+    
+    FinalTable = if List.Count(ActualRenamingPairs) > 0 
+                 then Table.RenameColumns(ProcessedData, ActualRenamingPairs)
+                 else ProcessedData
+in
+    FinalTable
