@@ -329,65 +329,63 @@ SimpleAllDataExample = GetSharePointListUltraFast(
 
 
 // =================================================================================
-// SHAREPOINT FIELD NAME DECODER
+// MAIN SHAREPOINT FUNCTION WITH AUTOMATIC COLUMN DECODING
 // =================================================================================
+// Create this as a single query/function in Power BI
 
-DecodeSharePointFieldName = (encodedName as text) as text =>
-let
-    // Common SharePoint field name encodings
-    DecodingMap = {
-        {"_x0020_", " "},        // Space
-        {"_x0027_", "'"},        // Apostrophe
-        {"_x0028_", "("},        // Left parenthesis
-        {"_x0029_", ")"},        // Right parenthesis
-        {"_x002d_", "-"},        // Hyphen
-        {"_x002e_", "."},        // Period
-        {"_x003a_", ":"},        // Colon
-        {"_x003b_", ";"},        // Semicolon
-        {"_x003c_", "<"},        // Less than
-        {"_x003e_", ">"},        // Greater than
-        {"_x003f_", "?"},        // Question mark
-        {"_x0040_", "@"},        // At symbol
-        {"_x005b_", "["},        // Left bracket
-        {"_x005c_", "\"},        // Backslash
-        {"_x005d_", "]"},        // Right bracket
-        {"_x007b_", "{"},        // Left brace
-        {"_x007c_", "|"},        // Pipe
-        {"_x007d_", "}"},        // Right brace
-        {"_x00a0_", " "},        // Non-breaking space
-        {"_x0023_", "#"},        // Hash/pound
-        {"_x0024_", "$"},        // Dollar sign
-        {"_x0025_", "%"},        // Percent
-        {"_x0026_", "&"},        // Ampersand
-        {"_x002a_", "*"},        // Asterisk
-        {"_x002b_", "+"},        // Plus
-        {"_x002c_", ","},        // Comma
-        {"_x002f_", "/"},        // Forward slash
-        {"_x003d_", "="},        // Equals
-        {"_x005e_", "^"},        // Caret
-        {"_x0060_", "`"},        // Backtick
-        {"_x007e_", "~"}         // Tilde
-    },
-    
-    // Apply all decodings
-    DecodedName = List.Accumulate(
-        DecodingMap,
-        encodedName,
-        (current, mapping) => Text.Replace(current, mapping{0}, mapping{1})
-    )
-in
-    DecodedName,
-
-// =================================================================================
-// ENHANCED SHAREPOINT FUNCTION WITH AUTOMATIC COLUMN DECODING
-// =================================================================================
-
-GetSharePointListUltraFastDecoded = (siteUrl as text, listName as text, optional filter as text, optional selectColumns as list, optional expandColumns as list, optional pageSize as number) as table =>
+(siteUrl as text, listName as text, optional filter as text, optional selectColumns as list, optional expandColumns as list, optional pageSize as number) as table =>
 let
     // Set defaults
     DefaultPageSize = if pageSize = null then 5000 else pageSize,
     CleanSiteUrl = if Text.EndsWith(siteUrl, "/") then Text.RemoveRange(siteUrl, Text.Length(siteUrl)-1) else siteUrl,
     BaseUrl = CleanSiteUrl & "/_api/web/lists/GetByTitle('" & listName & "')/",
+    
+    // SharePoint field name decoding function (defined within let block)
+    DecodeFieldName = (encodedName as text) as text =>
+        let
+            // Common SharePoint field name encodings
+            DecodingSteps = {
+                {"_x0020_", " "},        // Space
+                {"_x0027_", "'"},        // Apostrophe
+                {"_x0028_", "("},        // Left parenthesis
+                {"_x0029_", ")"},        // Right parenthesis
+                {"_x002d_", "-"},        // Hyphen
+                {"_x002e_", "."},        // Period
+                {"_x003a_", ":"},        // Colon
+                {"_x003b_", ";"},        // Semicolon
+                {"_x003c_", "<"},        // Less than
+                {"_x003e_", ">"},        // Greater than
+                {"_x003f_", "?"},        // Question mark
+                {"_x0040_", "@"},        // At symbol
+                {"_x005b_", "["},        // Left bracket
+                {"_x005c_", "\"},        // Backslash
+                {"_x005d_", "]"},        // Right bracket
+                {"_x007b_", "{"},        // Left brace
+                {"_x007c_", "|"},        // Pipe
+                {"_x007d_", "}"},        // Right brace
+                {"_x00a0_", " "},        // Non-breaking space
+                {"_x0023_", "#"},        // Hash/pound
+                {"_x0024_", "$"},        // Dollar sign
+                {"_x0025_", "%"},        // Percent
+                {"_x0026_", "&"},        // Ampersand
+                {"_x002a_", "*"},        // Asterisk
+                {"_x002b_", "+"},        // Plus
+                {"_x002c_", ","},        // Comma
+                {"_x002f_", "/"},        // Forward slash
+                {"_x003d_", "="},        // Equals
+                {"_x005e_", "^"},        // Caret
+                {"_x0060_", "`"},        // Backtick
+                {"_x007e_", "~"}         // Tilde
+            },
+            
+            // Apply all decodings sequentially
+            DecodedName = List.Accumulate(
+                DecodingSteps,
+                encodedName,
+                (current, mapping) => Text.Replace(current, mapping{0}, mapping{1})
+            )
+        in
+            DecodedName,
     
     // Build filter clause
     FilterClause = if filter = null then "" else "&$filter=" & filter,
@@ -437,7 +435,7 @@ let
     
     // Decode all column names
     OriginalColumnNames = Table.ColumnNames(RawData),
-    DecodedColumnNames = List.Transform(OriginalColumnNames, each DecodeSharePointFieldName(_)),
+    DecodedColumnNames = List.Transform(OriginalColumnNames, each DecodeFieldName(_)),
     
     // Create renaming pairs (only if names actually changed)
     RenamingPairs = List.Transform(
@@ -455,4 +453,4 @@ let
                  then Table.RenameColumns(RawData, ActualRenamingPairs)
                  else RawData
 in
-    FinalTable,
+    FinalTable
