@@ -129,3 +129,201 @@ let
     
 in
     #"Expanded value"
+
+// =================================================================================
+// ENHANCED SHAREPOINT FUNCTION WITH AUTOMATIC PAGINATION
+// =================================================================================
+// Fastest SharePoint data loading with automatic handling of >5000 records
+// Usage: GetSharePointListUltraFast("https://tenant.sharepoint.com/sites/sitename", "ListName", "Status eq 'Active'", {"ID","Title","Status"}, null, 5000)
+
+GetSharePointListUltraFast = (siteUrl as text, listName as text, optional filter as text, optional selectColumns as list, optional expandColumns as list, optional pageSize as number) as table =>
+let
+    // Set defaults
+    DefaultPageSize = if pageSize = null then 5000 else pageSize,
+    
+    // Parse the site URL to extract components
+    CleanSiteUrl = if Text.EndsWith(siteUrl, "/") then Text.RemoveRange(siteUrl, Text.Length(siteUrl)-1) else siteUrl,
+    
+    // Build base API URL
+    BaseUrl = CleanSiteUrl & "/_api/web/lists/GetByTitle('" & listName & "')/",
+    
+    // Build filter clause
+    FilterClause = if filter = null then "" else "&$filter=" & filter,
+    
+    // Build select clause
+    SelectClause = if selectColumns = null then "" 
+                  else "&$select=" & Text.Combine(selectColumns, ",") & 
+                       (if expandColumns = null then "" else "," & Text.Combine(expandColumns, ",")),
+    
+    // Build expand clause  
+    ExpandClause = if expandColumns = null then "" else "&$expand=" & Text.Combine(expandColumns, ","),
+    
+    // Combine all field specifications
+    FieldSelect = "&$top=" & Text.From(DefaultPageSize) & FilterClause & SelectClause & ExpandClause,
+    
+    // Get total item count (with filter applied if provided)
+    ItemCountUrl = BaseUrl & "ItemCount" & (if filter = null then "" else "?$filter=" & filter),
+    ItemCount = Json.Document(Web.Contents(ItemCountUrl, [Headers=[Accept="application/json"]]))[value],
+    
+    // Calculate pagination - only if more than pageSize records
+    Result = if ItemCount <= DefaultPageSize then
+        // Single page - no pagination needed
+        let
+            SinglePageUrl = BaseUrl & "items?" & Text.RemoveRange(FieldSelect, 0, 1), // Remove leading &
+            SinglePageData = Json.Document(Web.Contents(SinglePageUrl, [Headers=[Accept="application/json"]])),
+            SinglePageTable = Table.FromRecords(SinglePageData[value])
+        in
+            SinglePageTable
+    else
+        // Multi-page - use pagination
+        let
+            // Create skip list for pagination
+            SkipList = List.Numbers(0, Number.RoundUp(ItemCount/DefaultPageSize), DefaultPageSize),
+            SkipTable = Table.FromList(SkipList, Splitter.SplitByNothing(), null, null, ExtraValues.Error),
+            RenamedSkipTable = Table.RenameColumns(SkipTable, {{"Column1", "Skip"}}),
+            SkipTableTyped = Table.TransformColumnTypes(RenamedSkipTable, {{"Skip", type text}}),
+            
+            // Add column with paginated data
+            PaginatedData = Table.AddColumn(SkipTableTyped, "Items", each 
+                Json.Document(Web.Contents(BaseUrl & "items?$skipToken=Paged=TRUE%26p_ID=" & [Skip] & FieldSelect, 
+                [Headers=[Accept="application/json"]]))
+            ),
+            
+            // Expand the nested data
+            ExpandedItems = Table.ExpandRecordColumn(PaginatedData, "Items", {"value"}, {"value"}),
+            ExpandedValues = Table.ExpandListColumn(ExpandedItems, "value"),
+            
+            // Remove the Skip column to clean up
+            CleanedData = Table.RemoveColumns(ExpandedValues, {"Skip"})
+        in
+            CleanedData
+in
+    Result,
+
+// =================================================================================
+// SIMPLIFIED VERSION FOR YOUR DATE FILTERING USE CASE
+// =================================================================================
+
+GetSharePointListWithDateFilter = (siteUrl as text, listName as text, dateFieldName as text, monthsBack as number, optional additionalFilter as text, optional selectColumns as list) as table =>
+let
+    // Calculate date filter
+    MonthsAgoDate = Date.AddMonths(DateTime.Date(DateTime.LocalNow()), -monthsBack),
+    DateFilterFormatted = DateTime.ToText(DateTime.From(MonthsAgoDate), "yyyy-MM-ddTHH:mm:ss") & "Z",
+    
+    // Encode field name for SharePoint API (spaces become _x0020_)
+    EncodedFieldName = Text.Replace(Text.Replace(dateFieldName, " ", "_x0020_"), "'", "_x0027_"),
+    
+    // Build date filter
+    DateFilter = EncodedFieldName & " ge datetime'" & DateFilterFormatted & "'",
+    
+    // Combine with additional filter if provided
+    CombinedFilter = if additionalFilter = null then DateFilter 
+                    else DateFilter & " and (" & additionalFilter & ")",
+    
+    // Call the main function
+    Result = GetSharePointListUltraFast(siteUrl, listName, CombinedFilter, selectColumns, null, 5000)
+in
+    Result,
+
+// =================================================================================
+// BATCH PROCESSING VERSION FOR EXTREMELY LARGE DATASETS
+// =================================================================================
+
+GetSharePointListBatched = (siteUrl as text, listName as text, optional filter as text, optional selectColumns as list, optional batchSize as number) as table =>
+let
+    DefaultBatchSize = if batchSize = null then 2000 else batchSize, // Smaller batches for stability
+    
+    CleanSiteUrl = if Text.EndsWith(siteUrl, "/") then Text.RemoveRange(siteUrl, Text.Length(siteUrl)-1) else siteUrl,
+    BaseUrl = CleanSiteUrl & "/_api/web/lists/GetByTitle('" & listName & "')/",
+    
+    // Get total count
+    ItemCountUrl = BaseUrl & "ItemCount" & (if filter = null then "" else "?$filter=" & filter),
+    ItemCount = Json.Document(Web.Contents(ItemCountUrl, [Headers=[Accept="application/json"]]))[value],
+    
+    // Build field selection
+    SelectClause = if selectColumns = null then "" else "&$select=" & Text.Combine(selectColumns, ","),
+    FilterClause = if filter = null then "" else "&$filter=" & filter,
+    
+    // Create batch ranges
+    BatchCount = Number.RoundUp(ItemCount / DefaultBatchSize),
+    BatchRanges = List.Generate(
+        () => 0,
+        each _ < BatchCount,
+        each _ + 1,
+        each [
+            Skip = _ * DefaultBatchSize,
+            BatchNumber = _ + 1
+        ]
+    ),
+    
+    // Function to get one batch
+    GetBatch = (batchInfo as record) as table =>
+        let
+            BatchUrl = BaseUrl & "items?$skipToken=Paged=TRUE%26p_ID=" & Text.From(batchInfo[Skip]) & 
+                      "&$top=" & Text.From(DefaultBatchSize) & FilterClause & SelectClause,
+            
+            BatchData = try Json.Document(Web.Contents(BatchUrl, [Headers=[Accept="application/json"]])) 
+                       otherwise [value = {}],
+            
+            BatchTable = Table.FromRecords(BatchData[value])
+        in
+            BatchTable,
+    
+    // Get all batches
+    AllBatches = List.Transform(BatchRanges, GetBatch),
+    CombinedData = Table.Combine(AllBatches)
+in
+    CombinedData,
+
+// =================================================================================
+// USAGE EXAMPLES
+// =================================================================================
+
+// Example 1: Your specific date filtering case (15 months of data)
+YourDateExample = GetSharePointListWithDateFilter(
+    "https://yourcompany.sharepoint.com/sites/ProjectSite",
+    "YourListName",
+    "AV Monthend Date",  // Your date field name
+    15,  // Last 15 months
+    "Status ne 'Archived'",  // Additional filter (optional)
+    {"ID", "Title", "AV Monthend Date", "Status", "Amount"}  // Select specific columns
+),
+
+// Example 2: Large dataset with automatic pagination
+LargeDatasetExample = GetSharePointListUltraFast(
+    "https://yourcompany.sharepoint.com/sites/ProjectSite",
+    "TransactionHistory",
+    "TransactionDate ge datetime'2023-01-01T00:00:00Z'",  // Filter
+    {"ID", "Title", "TransactionDate", "Amount", "Status"},  // Select columns
+    null,  // No expand needed
+    5000   // Page size
+),
+
+// Example 3: With lookup field expansion
+ExpandedFieldExample = GetSharePointListUltraFast(
+    "https://yourcompany.sharepoint.com/sites/ProjectSite", 
+    "ProjectTasks",
+    "Status eq 'Active'",
+    {"ID", "Title", "AssignedTo/Title", "Category/Title", "DueDate"},  // Select with lookup fields
+    {"AssignedTo", "Category"},  // Expand lookup fields
+    3000
+),
+
+// Example 4: Batched processing for extremely large datasets
+ExtremeLargeDataExample = GetSharePointListBatched(
+    "https://yourcompany.sharepoint.com/sites/ProjectSite",
+    "HistoricalData",
+    "Year ge 2020",
+    {"ID", "Title", "Date", "Value"},
+    1000  // Smaller batch size for stability
+),
+
+// Example 5: Simple usage (no filtering, all data with auto-pagination)
+SimpleAllDataExample = GetSharePointListUltraFast(
+    "https://yourcompany.sharepoint.com/sites/ProjectSite",
+    "SimpleList",
+    null,  // No filter
+    null,  // All columns
+    null,  // No expansion
+    5000   // Standard page size
+)
