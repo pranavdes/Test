@@ -1,6 +1,5 @@
-// =================================================================================
-// BASIC FAST SHAREPOINT LIST FUNCTION
-// =================================================================================
+// GetSharePointListFast Function
+// Create this as a separate query/function in Power BI
 // Usage: GetSharePointListFast("https://company.sharepoint.com/sites/MyProject", "TaskList", "Status eq 'Active'", {"ID","Title","Status","DueDate"}, 5000)
 
 (siteUrl as text, listName as text, optional filter as text, optional selectColumns as list, optional topCount as number) as table =>
@@ -29,22 +28,15 @@ let
             Timeout = #duration(0,0,5,0),
             Headers = [Accept = "application/json;odata=nometadata"]
         ]
-    ) otherwise error "Failed to connect to SharePoint list: " & listName & " at " & siteUrl,
-    
-    // Handle potential errors in the result
-    Result = if Source[HasError]? = true then 
-                error "SharePoint query failed: " & Source[Error][Message] 
-             else 
-                Source
+    ) otherwise error "Failed to connect to SharePoint list: " & listName & " at " & siteUrl
 in
-    Result,
+    Source
 
-// =================================================================================
-// ENHANCED SHAREPOINT LIST FUNCTION WITH RETRY LOGIC
-// =================================================================================
+// GetSharePointListAdvanced Function with Retry Logic
+// Create this as a separate query/function in Power BI
 // Usage: GetSharePointListAdvanced("https://company.sharepoint.com/sites/MyProject", "TaskList", "Status eq 'Active'", {"ID","Title","Status","DueDate"}, 5000, 30, "Created")
 
-GetSharePointListAdvanced = (siteUrl as text, listName as text, optional filter as text, optional selectColumns as list, optional topCount as number, optional daysSince as number, optional orderByField as text) as table =>
+(siteUrl as text, listName as text, optional filter as text, optional selectColumns as list, optional topCount as number, optional daysSince as number, optional orderByField as text) as table =>
 let
     // Set default values
     DefaultDays = if daysSince = null then 365 else daysSince,
@@ -101,39 +93,4 @@ let
     // Execute with retry
     Result = TryGetWithRetry(0)
 in
-    Result,
-
-// =================================================================================
-// USAGE EXAMPLES
-// =================================================================================
-
-// Example 1: Basic usage - get all active tasks
-BasicExample = GetSharePointListFast(
-    "https://contoso.sharepoint.com/sites/ProjectSite", 
-    "TaskList", 
-    "Status eq 'Active'", 
-    {"ID", "Title", "Status", "DueDate", "AssignedTo"}, 
-    1000
-),
-
-// Example 2: Advanced usage with date filtering
-AdvancedExample = GetSharePointListAdvanced(
-    "https://contoso.sharepoint.com/sites/ProjectSite", 
-    "ProjectTracker", 
-    "Priority eq 'High'", 
-    {"ID", "Title", "ProjectManager", "Status", "Budget"}, 
-    500, 
-    90,  // Last 90 days
-    "Modified"  // Order by Modified date
-),
-
-// Example 3: No filtering, just recent items
-RecentItemsExample = GetSharePointListAdvanced(
-    "https://contoso.sharepoint.com/sites/ProjectSite", 
-    "DocumentLibrary", 
-    null,  // No additional filter
-    null,  // All columns
-    100,   // Top 100 items
-    30,    // Last 30 days
-    "Created"
-)
+    Result
