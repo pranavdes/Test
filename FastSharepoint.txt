@@ -325,5 +325,134 @@ SimpleAllDataExample = GetSharePointListUltraFast(
     null,  // No filter
     null,  // All columns
     null,  // No expansion
-    5000   // Standard page size
-)
+    5000   
+
+
+// =================================================================================
+// SHAREPOINT FIELD NAME DECODER
+// =================================================================================
+
+DecodeSharePointFieldName = (encodedName as text) as text =>
+let
+    // Common SharePoint field name encodings
+    DecodingMap = {
+        {"_x0020_", " "},        // Space
+        {"_x0027_", "'"},        // Apostrophe
+        {"_x0028_", "("},        // Left parenthesis
+        {"_x0029_", ")"},        // Right parenthesis
+        {"_x002d_", "-"},        // Hyphen
+        {"_x002e_", "."},        // Period
+        {"_x003a_", ":"},        // Colon
+        {"_x003b_", ";"},        // Semicolon
+        {"_x003c_", "<"},        // Less than
+        {"_x003e_", ">"},        // Greater than
+        {"_x003f_", "?"},        // Question mark
+        {"_x0040_", "@"},        // At symbol
+        {"_x005b_", "["},        // Left bracket
+        {"_x005c_", "\"},        // Backslash
+        {"_x005d_", "]"},        // Right bracket
+        {"_x007b_", "{"},        // Left brace
+        {"_x007c_", "|"},        // Pipe
+        {"_x007d_", "}"},        // Right brace
+        {"_x00a0_", " "},        // Non-breaking space
+        {"_x0023_", "#"},        // Hash/pound
+        {"_x0024_", "$"},        // Dollar sign
+        {"_x0025_", "%"},        // Percent
+        {"_x0026_", "&"},        // Ampersand
+        {"_x002a_", "*"},        // Asterisk
+        {"_x002b_", "+"},        // Plus
+        {"_x002c_", ","},        // Comma
+        {"_x002f_", "/"},        // Forward slash
+        {"_x003d_", "="},        // Equals
+        {"_x005e_", "^"},        // Caret
+        {"_x0060_", "`"},        // Backtick
+        {"_x007e_", "~"}         // Tilde
+    },
+    
+    // Apply all decodings
+    DecodedName = List.Accumulate(
+        DecodingMap,
+        encodedName,
+        (current, mapping) => Text.Replace(current, mapping{0}, mapping{1})
+    )
+in
+    DecodedName,
+
+// =================================================================================
+// ENHANCED SHAREPOINT FUNCTION WITH AUTOMATIC COLUMN DECODING
+// =================================================================================
+
+GetSharePointListUltraFastDecoded = (siteUrl as text, listName as text, optional filter as text, optional selectColumns as list, optional expandColumns as list, optional pageSize as number) as table =>
+let
+    // Set defaults
+    DefaultPageSize = if pageSize = null then 5000 else pageSize,
+    CleanSiteUrl = if Text.EndsWith(siteUrl, "/") then Text.RemoveRange(siteUrl, Text.Length(siteUrl)-1) else siteUrl,
+    BaseUrl = CleanSiteUrl & "/_api/web/lists/GetByTitle('" & listName & "')/",
+    
+    // Build filter clause
+    FilterClause = if filter = null then "" else "&$filter=" & filter,
+    
+    // Build select clause
+    SelectClause = if selectColumns = null then "" 
+                  else "&$select=" & Text.Combine(selectColumns, ",") & 
+                       (if expandColumns = null then "" else "," & Text.Combine(expandColumns, ",")),
+    
+    // Build expand clause  
+    ExpandClause = if expandColumns = null then "" else "&$expand=" & Text.Combine(expandColumns, ","),
+    
+    // Combine all field specifications
+    FieldSelect = "&$top=" & Text.From(DefaultPageSize) & FilterClause & SelectClause & ExpandClause,
+    
+    // Get total item count
+    ItemCountUrl = BaseUrl & "ItemCount" & (if filter = null then "" else "?$filter=" & filter),
+    ItemCount = Json.Document(Web.Contents(ItemCountUrl, [Headers=[Accept="application/json"]]))[value],
+    
+    // Get the raw data (with encoded column names)
+    RawData = if ItemCount <= DefaultPageSize then
+        // Single page
+        let
+            SinglePageUrl = BaseUrl & "items?" & Text.RemoveRange(FieldSelect, 0, 1),
+            SinglePageData = Json.Document(Web.Contents(SinglePageUrl, [Headers=[Accept="application/json"]])),
+            SinglePageTable = Table.FromRecords(SinglePageData[value])
+        in
+            SinglePageTable
+    else
+        // Multi-page pagination
+        let
+            SkipList = List.Numbers(0, Number.RoundUp(ItemCount/DefaultPageSize), DefaultPageSize),
+            SkipTable = Table.FromList(SkipList, Splitter.SplitByNothing(), null, null, ExtraValues.Error),
+            RenamedSkipTable = Table.RenameColumns(SkipTable, {{"Column1", "Skip"}}),
+            SkipTableTyped = Table.TransformColumnTypes(RenamedSkipTable, {{"Skip", type text}}),
+            
+            PaginatedData = Table.AddColumn(SkipTableTyped, "Items", each 
+                Json.Document(Web.Contents(BaseUrl & "items?$skipToken=Paged=TRUE%26p_ID=" & [Skip] & FieldSelect, 
+                [Headers=[Accept="application/json"]]))
+            ),
+            
+            ExpandedItems = Table.ExpandRecordColumn(PaginatedData, "Items", {"value"}, {"value"}),
+            ExpandedValues = Table.ExpandListColumn(ExpandedItems, "value"),
+            CleanedData = Table.RemoveColumns(ExpandedValues, {"Skip"})
+        in
+            CleanedData,
+    
+    // Decode all column names
+    OriginalColumnNames = Table.ColumnNames(RawData),
+    DecodedColumnNames = List.Transform(OriginalColumnNames, each DecodeSharePointFieldName(_)),
+    
+    // Create renaming pairs (only if names actually changed)
+    RenamingPairs = List.Transform(
+        List.Positions(OriginalColumnNames),
+        each if OriginalColumnNames{_} <> DecodedColumnNames{_} 
+             then {OriginalColumnNames{_}, DecodedColumnNames{_}}
+             else null
+    ),
+    
+    // Filter out null entries (columns that didn't need renaming)
+    ActualRenamingPairs = List.RemoveNulls(RenamingPairs),
+    
+    // Apply column renaming
+    FinalTable = if List.Count(ActualRenamingPairs) > 0 
+                 then Table.RenameColumns(RawData, ActualRenamingPairs)
+                 else RawData
+in
+    FinalTable,
