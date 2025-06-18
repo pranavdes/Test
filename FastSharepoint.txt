@@ -32,7 +32,7 @@ let
 in
     Source
 
-// GetSharePointListAdvanced Function with Retry Logic
+// GetSharePointListAdvanced Function - Fixed Version
 // Create this as a separate query/function in Power BI
 // Usage: GetSharePointListAdvanced("https://company.sharepoint.com/sites/MyProject", "TaskList", "Status eq 'Active'", {"ID","Title","Status","DueDate"}, 5000, 30, "Created")
 
@@ -66,10 +66,19 @@ let
                SelectClause & 
                TopClause,
     
-    // Retry logic function
-    TryGetWithRetry = (retryCount as number) as any =>
-    let
-        Attempt = try OData.Feed(
+    // Simple retry logic - try 3 times with different timeouts
+    Attempt1 = try OData.Feed(
+        ODataUrl,
+        null,
+        [
+            Implementation = "2.0",
+            Timeout = #duration(0,0,2,0),
+            Headers = [Accept = "application/json;odata=nometadata"]
+        ]
+    ),
+    
+    Attempt2 = if Attempt1[HasError] = false then Attempt1 else
+        try OData.Feed(
             ODataUrl,
             null,
             [
@@ -77,20 +86,23 @@ let
                 Timeout = #duration(0,0,5,0),
                 Headers = [Accept = "application/json;odata=nometadata"]
             ]
-        )
-    in
-        if Attempt[HasError] = false then
-            Attempt[Value]
-        else if retryCount < 3 then
-            let
-                WaitTime = Number.Power(2, retryCount),
-                Wait = Function.InvokeAfter(() => TryGetWithRetry(retryCount + 1), #duration(0,0,0,WaitTime))
-            in
-                Wait
-        else
-            error "SharePoint connection failed after 3 attempts. List: " & listName & " | Error: " & Attempt[Error][Message],
+        ),
     
-    // Execute with retry
-    Result = TryGetWithRetry(0)
+    Attempt3 = if Attempt2[HasError] = false then Attempt2 else
+        try OData.Feed(
+            ODataUrl,
+            null,
+            [
+                Implementation = "2.0",
+                Timeout = #duration(0,0,10,0),
+                Headers = [Accept = "application/json;odata=nometadata"]
+            ]
+        ),
+    
+    // Final result with error handling
+    Result = if Attempt3[HasError] = false then 
+                Attempt3[Value] 
+             else 
+                error "SharePoint connection failed after 3 attempts. List: " & listName & " | URL: " & ODataUrl & " | Error: " & Attempt3[Error][Message]
 in
     Result
