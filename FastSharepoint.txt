@@ -456,7 +456,7 @@ in
     FinalTable
 ------------------------------------------------------------------------------------
 // =================================================================================
-// SHAREPOINT FUNCTION WITH AUTO DRILL-DOWN - FIXED VERSION
+// SHAREPOINT FUNCTION WITH AUTO DRILL-DOWN - HANDLES RECORDS AND LISTS
 // =================================================================================
 // Create this as: GetSharePointListAutoDrill
 
@@ -484,6 +484,38 @@ let
                 (current, mapping) => Text.Replace(current, mapping{0}, mapping{1}))
         in
             DecodedName,
+    
+    // Smart value expansion function
+    ExpandValueColumn = (inputTable as table) as table =>
+        let
+            Result = if Table.HasColumns(inputTable, {"value"}) then
+                let
+                    // Get a sample value to determine its type
+                    SampleValue = try Table.Column(Table.FirstN(inputTable, 1), "value"){0} otherwise null,
+                    
+                    ExpandedTable = if SampleValue = null then
+                        inputTable
+                    else if SampleValue is list then
+                        // It's a list - use ExpandListColumn
+                        try Table.ExpandListColumn(inputTable, "value") otherwise inputTable
+                    else if SampleValue is record then
+                        // It's a record - use ExpandRecordColumn
+                        try 
+                            let
+                                FieldNames = Record.FieldNames(SampleValue),
+                                Expanded = Table.ExpandRecordColumn(inputTable, "value", FieldNames, FieldNames)
+                            in
+                                Expanded
+                        otherwise inputTable
+                    else
+                        // It's some other type - leave as is
+                        inputTable
+                in
+                    ExpandedTable
+            else
+                inputTable
+        in
+            Result,
     
     // Build query parameters
     FilterClause = if filter = null then "" else "&$filter=" & filter,
@@ -526,41 +558,14 @@ let
             CleanedData,
     
     // Step-by-step drilling through "value" columns (up to 5 levels deep)
-    Step1 = if Table.HasColumns(RawData, {"value"}) then
-        try Table.ExpandListColumn(RawData, "value") otherwise RawData
-    else RawData,
+    // Each step intelligently handles both records and lists
+    Step1 = ExpandValueColumn(RawData),
+    Step2 = ExpandValueColumn(Step1),
+    Step3 = ExpandValueColumn(Step2),
+    Step4 = ExpandValueColumn(Step3),
+    Step5 = ExpandValueColumn(Step4),
     
-    Step2 = if Table.HasColumns(Step1, {"value"}) then
-        try Table.ExpandListColumn(Step1, "value") otherwise Step1
-    else Step1,
-    
-    Step3 = if Table.HasColumns(Step2, {"value"}) then
-        try Table.ExpandListColumn(Step2, "value") otherwise Step2
-    else Step2,
-    
-    Step4 = if Table.HasColumns(Step3, {"value"}) then
-        try Table.ExpandListColumn(Step3, "value") otherwise Step3
-    else Step3,
-    
-    Step5 = if Table.HasColumns(Step4, {"value"}) then
-        try Table.ExpandListColumn(Step4, "value") otherwise Step4
-    else Step4,
-    
-    // If still has "value" columns, try record expansion
-    Step6 = if Table.HasColumns(Step5, {"value"}) then
-        try 
-            let
-                SampleValue = Table.Column(Table.FirstN(Step5, 1), "value"){0}?,
-                FieldNames = if SampleValue is record then Record.FieldNames(SampleValue) else {},
-                ExpandedTable = if List.Count(FieldNames) > 0 then
-                    Table.ExpandRecordColumn(Step5, "value", FieldNames, FieldNames)
-                else Step5
-            in
-                ExpandedTable
-        otherwise Step5
-    else Step5,
-    
-    DrilledData = Step6,
+    DrilledData = Step5,
     
     // Decode column names
     OriginalColumnNames = Table.ColumnNames(DrilledData),
