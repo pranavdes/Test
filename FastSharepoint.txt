@@ -456,9 +456,8 @@ in
     FinalTable
 ------------------------------------------------------------------------------------
 // =================================================================================
-// SHAREPOINT FUNCTION WITH AUTO DRILL-DOWN THROUGH "VALUE" COLUMNS
+// SHAREPOINT FUNCTION WITH AUTO DRILL-DOWN - FIXED VERSION
 // =================================================================================
-// This function automatically expands "value" columns until it reaches actual data
 // Create this as: GetSharePointListAutoDrill
 
 (siteUrl as text, listName as text, optional filter as text, optional selectColumns as list, optional expandColumns as list, optional pageSize as number) as table =>
@@ -485,36 +484,6 @@ let
                 (current, mapping) => Text.Replace(current, mapping{0}, mapping{1}))
         in
             DecodedName,
-    
-    // Function to automatically drill down through "value" columns
-    DrillDownThroughValues = (inputTable as table) as table =>
-        let
-            // Check if table has "value" column
-            ColumnNames = Table.ColumnNames(inputTable),
-            HasValueColumn = List.Contains(ColumnNames, "value"),
-            
-            ProcessedTable = if HasValueColumn then
-                let
-                    // Expand the "value" column
-                    ExpandedTable = try Table.ExpandListColumn(inputTable, "value") otherwise inputTable,
-                    
-                    // Remove other columns if they exist (keep only the expanded data)
-                    CleanedTable = if Table.HasColumns(ExpandedTable, {"value"}) then
-                        Table.SelectColumns(ExpandedTable, {"value"})
-                    else 
-                        ExpandedTable,
-                    
-                    // Recursively check for more "value" columns
-                    FinalTable = if Table.HasColumns(CleanedTable, {"value"}) then
-                        DrillDownThroughValues(CleanedTable)
-                    else
-                        CleanedTable
-                in
-                    FinalTable
-            else
-                inputTable
-        in
-            ProcessedTable,
     
     // Build query parameters
     FilterClause = if filter = null then "" else "&$filter=" & filter,
@@ -556,8 +525,42 @@ let
         in
             CleanedData,
     
-    // Auto drill down through any "value" columns
-    DrilledData = DrillDownThroughValues(RawData),
+    // Step-by-step drilling through "value" columns (up to 5 levels deep)
+    Step1 = if Table.HasColumns(RawData, {"value"}) then
+        try Table.ExpandListColumn(RawData, "value") otherwise RawData
+    else RawData,
+    
+    Step2 = if Table.HasColumns(Step1, {"value"}) then
+        try Table.ExpandListColumn(Step1, "value") otherwise Step1
+    else Step1,
+    
+    Step3 = if Table.HasColumns(Step2, {"value"}) then
+        try Table.ExpandListColumn(Step2, "value") otherwise Step2
+    else Step2,
+    
+    Step4 = if Table.HasColumns(Step3, {"value"}) then
+        try Table.ExpandListColumn(Step3, "value") otherwise Step3
+    else Step3,
+    
+    Step5 = if Table.HasColumns(Step4, {"value"}) then
+        try Table.ExpandListColumn(Step4, "value") otherwise Step4
+    else Step4,
+    
+    // If still has "value" columns, try record expansion
+    Step6 = if Table.HasColumns(Step5, {"value"}) then
+        try 
+            let
+                SampleValue = Table.Column(Table.FirstN(Step5, 1), "value"){0}?,
+                FieldNames = if SampleValue is record then Record.FieldNames(SampleValue) else {},
+                ExpandedTable = if List.Count(FieldNames) > 0 then
+                    Table.ExpandRecordColumn(Step5, "value", FieldNames, FieldNames)
+                else Step5
+            in
+                ExpandedTable
+        otherwise Step5
+    else Step5,
+    
+    DrilledData = Step6,
     
     // Decode column names
     OriginalColumnNames = Table.ColumnNames(DrilledData),
