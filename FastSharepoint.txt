@@ -455,12 +455,9 @@ let
 in
     FinalTable
 ------------------------------------------------------------------------------------
-
-
 // =================================================================================
-// ENHANCED FUNCTION WITH SMART COMPLEX FIELD HANDLING
+// ENHANCED FUNCTION WITH SMART COMPLEX FIELD HANDLING - FIXED
 // =================================================================================
-// This version attempts to automatically handle complex fields
 // Create this as: GetSharePointListSmart
 
 (siteUrl as text, listName as text, optional filter as text, optional selectColumns as list, optional autoExpandComplex as logical, optional pageSize as number) as table =>
@@ -530,14 +527,14 @@ let
             SampleRow = Table.FirstN(RawData, 1),
             ColumnNames = Table.ColumnNames(RawData),
             
-            // Identify complex columns that need expansion
+            // Identify complex columns that need expansion using correct type checking
             ComplexColumns = List.Select(ColumnNames, each
                 let
                     SampleValue = Table.Column(SampleRow, _){0}?,
-                    ValueType = Value.Type(SampleValue),
-                    TypeName = Type.ToText(ValueType)
+                    IsRecord = SampleValue is record,
+                    IsList = SampleValue is list
                 in
-                    TypeName = "type record" or TypeName = "type list"
+                    IsRecord or IsList
             ),
             
             // Expand record columns (like lookup fields)
@@ -547,13 +544,13 @@ let
                 (currentTable, columnName) =>
                     let
                         SampleValue = Table.Column(Table.FirstN(currentTable, 1), columnName){0}?,
-                        ValueType = Value.Type(SampleValue),
-                        TypeName = Type.ToText(ValueType)
+                        IsRecord = SampleValue is record,
+                        IsList = SampleValue is list
                     in
-                        if TypeName = "type record" then
+                        if IsRecord then
                             try 
                                 let
-                                    // For lookup fields, typically expand common properties
+                                    // For lookup fields, try to expand common properties
                                     ExpandedTable = Table.ExpandRecordColumn(currentTable, columnName, 
                                         {"Id", "Title", "EMail", "Name"}, 
                                         {columnName & ".Id", columnName & ".Title", columnName & ".EMail", columnName & ".Name"}
@@ -561,12 +558,12 @@ let
                                 in
                                     ExpandedTable
                             otherwise currentTable
-                        else if TypeName = "type list" then
+                        else if IsList then
                             try
                                 // For multi-value fields, convert to text
                                 Table.TransformColumns(currentTable, {{columnName, each 
                                     if _ = null then null
-                                    else if Value.Type(_) = type list then Text.Combine(List.Transform(_, Text.From), "; ")
+                                    else if _ is list then Text.Combine(List.Transform(_, Text.From), "; ")
                                     else Text.From(_)
                                 }})
                             otherwise currentTable
