@@ -1,3 +1,59 @@
+
+Q2: Create an M function that can handle incremental data loading with automatic schema drift detection and reconciliation.
+Expected Answer:
+mlet
+    IncrementalLoadWithSchemaDrift = (
+        SourceTable as table,
+        LastRefreshDate as datetime,
+        SchemaReferenceTable as table
+    ) =>
+    let
+        // Get current schema
+        CurrentSchema = Table.Schema(SourceTable),
+        ReferenceSchema = Table.Schema(SchemaReferenceTable),
+        
+        // Detect schema changes
+        CurrentColumns = CurrentSchema[Name],
+        ReferenceColumns = ReferenceSchema[Name],
+        
+        NewColumns = List.Difference(CurrentColumns, ReferenceColumns),
+        RemovedColumns = List.Difference(ReferenceColumns, CurrentColumns),
+        
+        // Handle schema drift
+        SchemaAdjustedTable = 
+            if List.Count(NewColumns) > 0 or List.Count(RemovedColumns) > 0
+            then
+                let
+                    // Add missing columns with null values
+                    AddColumns = List.Accumulate(
+                        RemovedColumns,
+                        SourceTable,
+                        (state, current) => Table.AddColumn(state, current, each null)
+                    ),
+                    
+                    // Remove extra columns or log them
+                    FinalTable = Table.SelectColumns(AddColumns, ReferenceColumns)
+                in
+                    FinalTable
+            else SourceTable,
+        
+        // Apply incremental filter
+        FilteredTable = Table.SelectRows(
+            SchemaAdjustedTable,
+            each [ModifiedDate] > LastRefreshDate
+        )
+    in
+        FilteredTable
+in
+    IncrementalLoadWithSchemaDrift
+
+
+
+
+
+
+
+=========================================================================================
 # M Function Explanation: Incremental Loading with Schema Drift Detection
 
 ## The Business Problem
