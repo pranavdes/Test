@@ -1,330 +1,278 @@
-# Customer Database Schema Evolution - Concrete M Function Example
+Customer_Sales_Matrix Table:
+CustomerID | Jan_Electronics | Jan_Clothing | Feb_Electronics | Feb_Clothing | Mar_Electronics | Mar_Clothing
+1001 | 100 | 50 | 150 | 75 | 200 | 80
+1002 | 200 | 0 | 0 | 100 | 250 | 120
 
-## Business Context: Online Retail Company "ShopEasy"
 
-### Database Tables:
-- **`Customers`** - Main customer information
-- **`CustomerAddresses`** - Customer shipping/billing addresses  
-- **`CustomerOrders`** - Order history
-- **`CustomerContacts`** - Phone numbers, social media contacts
+Dynamically unpivot ALL month-category combinations (regardless of how many months/categories are added)
 
-## Customers Table Evolution Timeline
 
-### January 2024: Initial Schema
-```sql
--- Original Customers table structure
-CREATE TABLE Customers (
-    CustomerID INT PRIMARY KEY,
-    FirstName VARCHAR(50),
-    LastName VARCHAR(50), 
-    Email VARCHAR(100),
-    PhoneNumber VARCHAR(20),
-    DateRegistered DATETIME,
-    LastModifiedDate DATETIME
-);
-```
+CustomerID	Month	Category	Value	Sales_Trend
+1001	Jan	Electronics	$100.00	null
+1001	Feb	Electronics	$150.00	50.00%
+1001	Mar	Electronics	$200.00	33.33%
 
-### March 2024: Loyalty Program Added
-```sql
--- After loyalty program launch
-ALTER TABLE Customers ADD LoyaltyTierID INT;
-ALTER TABLE Customers ADD LoyaltyPoints INT DEFAULT 0;
-ALTER TABLE Customers ADD LoyaltyJoinDate DATETIME;
-```
 
-### May 2024: GDPR Compliance
-```sql
--- GDPR fields added, phone moved to separate table
-ALTER TABLE Customers ADD GDPRConsentStatus VARCHAR(20) DEFAULT 'Pending';
-ALTER TABLE Customers ADD ConsentDate DATETIME;
-ALTER TABLE Customers DROP COLUMN PhoneNumber; -- Moved to CustomerContacts
-```
 
-### July 2024: Customer Segmentation
-```sql
--- Marketing segmentation fields
-ALTER TABLE Customers ADD CustomerSegment VARCHAR(30) DEFAULT 'Standard';
-ALTER TABLE Customers ADD PreferredContactMethod VARCHAR(20) DEFAULT 'Email';
-ALTER TABLE Customers ADD MarketingOptIn BIT DEFAULT 0;
-```
 
-## M Function Implementation with Real Table Names
+Step 1: Initial Data Source
+mSource = Customer_Sales_Matrix,
+Purpose: Load the source table with customer sales data across different month-category combinations.
 
-```m
+Step 2: Dynamic Unpivoting
+m#"Unpivoted Columns" = Table.UnpivotOtherColumns(Source, {"CustomerID"}, "Attribute", "Value"),
+Purpose:
+
+Unpivot all columns except CustomerID
+Creates two new columns: "Attribute" (column names) and "Value" (cell values)
+Makes the wide table format into a long format
+
+Before:
+CustomerIDJan_ElectronicsJan_ClothingFeb_Electronics100110050150
+After:
+CustomerIDAttributeValue1001Jan_Electronics1001001Jan_Clothing501001Feb_Electronics150
+
+Step 3: Create Enhanced Parsing Function
+mParseAttributeAdvanced = (attributeName as text) as record =>
 let
-    // Function to handle Customers table incremental loading with schema drift
-    LoadCustomersTableIncremental = (
-        SourceCustomersTable as table,
-        LastRefreshDateTime as datetime,
-        CustomersReferenceTable as table
-    ) =>
-    let
-        // Step 1: Compare current Customers table with reference schema
-        CurrentSchema = Table.Schema(SourceCustomersTable),
-        ReferenceSchema = Table.Schema(CustomersReferenceTable),
-        
-        CurrentColumns = CurrentSchema[Name],
-        ReferenceColumns = ReferenceSchema[Name],
-        
-        // Find what's new or missing in Customers table
-        NewColumnsInSource = List.Difference(CurrentColumns, ReferenceColumns),
-        MissingColumnsInSource = List.Difference(ReferenceColumns, CurrentColumns),
-        
-        // Step 2: Handle Customers table schema changes
-        CustomersSchemaFixed = 
-            if List.Count(NewColumnsInSource) > 0 or List.Count(MissingColumnsInSource) > 0
-            then
-                let
-                    // Add missing columns to Customers table with business defaults
-                    AddMissingColumns = List.Accumulate(
-                        MissingColumnsInSource,
-                        SourceCustomersTable,
-                        (currentTable, missingColumn) => 
-                            // Add column with appropriate default based on Customers table business rules
-                            if missingColumn = "LoyaltyTierID" then
-                                Table.AddColumn(currentTable, missingColumn, each 1, type number) // Bronze = 1
-                            else if missingColumn = "LoyaltyPoints" then
-                                Table.AddColumn(currentTable, missingColumn, each 0, type number)
-                            else if missingColumn = "GDPRConsentStatus" then
-                                Table.AddColumn(currentTable, missingColumn, each "Pending", type text)
-                            else if missingColumn = "CustomerSegment" then
-                                Table.AddColumn(currentTable, missingColumn, each "Standard", type text)
-                            else if missingColumn = "PreferredContactMethod" then
-                                Table.AddColumn(currentTable, missingColumn, each "Email", type text)
-                            else if missingColumn = "MarketingOptIn" then
-                                Table.AddColumn(currentTable, missingColumn, each false, type logical)
-                            else if Text.Contains(missingColumn, "Date") then
-                                Table.AddColumn(currentTable, missingColumn, each null, type datetime)
-                            else
-                                Table.AddColumn(currentTable, missingColumn, each null, type text)
-                    ),
-                    
-                    // Remove extra columns not in reference (keeps model stable)
-                    MatchReferenceSchema = Table.SelectColumns(AddMissingColumns, ReferenceColumns)
-                in
-                    MatchReferenceSchema
-            else SourceCustomersTable,
-        
-        // Step 3: Apply incremental filter to Customers table
-        IncrementalCustomers = Table.SelectRows(
-            CustomersSchemaFixed,
-            each [LastModifiedDate] > LastRefreshDateTime
-        ),
-        
-        // Step 4: Validate Customers table data quality
-        ValidCustomers = Table.SelectRows(
-            IncrementalCustomers,
-            each 
-                [CustomerID] <> null and 
-                [FirstName] <> null and
-                [LastName] <> null and
-                [Email] <> null and
-                Text.Contains([Email], "@") and
-                [DateRegistered] <> null and
-                [LastModifiedDate] <> null
-        )
-    in
-        ValidCustomers
+    Parts = Text.Split(attributeName, "_"),
+    IsValidFormat = List.Count(Parts) = 2,
+    Month = if IsValidFormat then Parts{0} else "Unknown",
+    Category = if IsValidFormat then Parts{1} else "Unknown",
+    
+    // Validate month names
+    ValidMonths = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", 
+                  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"},
+    IsValidMonth = List.Contains(ValidMonths, Month),
+    
+    FinalMonth = if IsValidMonth then Month else "Invalid",
+    FinalCategory = if IsValidFormat then Category else "Invalid"
 in
-    LoadCustomersTableIncremental
-```
+    [Month = FinalMonth, Category = FinalCategory, IsValid = IsValidFormat and IsValidMonth],
+Purpose:
 
-## Setting Up Reference Schemas for Each Table
+Create a custom function that validates and parses attribute names
+Splits "Jan_Electronics" into Month="Jan" and Category="Electronics"
+Validates that the format is correct (has exactly 2 parts separated by "_")
+Validates that the month is a valid 3-letter month abbreviation
+Returns a record with parsed values and validation flag
 
-### Customers Table Reference Schema
-```m
-// This represents what your Power BI model expects from Customers table
-CustomersReference = #table(
-    {
-        "CustomerID", 
-        "FirstName", 
-        "LastName", 
-        "Email", 
-        "LoyaltyTierID", 
-        "LoyaltyPoints", 
-        "GDPRConsentStatus", 
-        "CustomerSegment", 
-        "PreferredContactMethod", 
-        "DateRegistered", 
-        "LastModifiedDate"
-    },
-    {
-        {1, "John", "Doe", "john@email.com", 1, 250, "Granted", "Premium", "Email", #datetime(2024,1,15,0,0,0), #datetime(2024,7,20,0,0,0)}
-    }
-)
-```
 
-### CustomerAddresses Table Reference Schema
-```m
-CustomerAddressesReference = #table(
-    {
-        "AddressID",
-        "CustomerID", 
-        "AddressType", 
-        "StreetAddress", 
-        "City", 
-        "StateProvince", 
-        "PostalCode", 
-        "Country",
-        "IsDefault",
-        "LastModifiedDate"
-    },
-    {
-        {1, 1, "Shipping", "123 Main St", "Springfield", "IL", "62701", "USA", true, #datetime(2024,1,15,0,0,0)}
-    }
-)
-```
+Step 4: Apply Enhanced Parsing Function
+m#"Added Parsed Data" = Table.AddColumn(#"Unpivoted Columns", "ParsedData", 
+    each ParseAttributeAdvanced([Attribute])),
+Purpose:
 
-### CustomerOrders Table Reference Schema
-```m
-CustomerOrdersReference = #table(
-    {
-        "OrderID",
-        "CustomerID",
-        "OrderDate",
-        "OrderTotal",
-        "OrderStatus",
-        "ShippingAddressID",
-        "PaymentMethod",
-        "LastModifiedDate"
-    },
-    {
-        {1001, 1, #datetime(2024,7,15,0,0,0), 156.99, "Completed", 1, "Credit Card", #datetime(2024,7,16,0,0,0)}
-    }
-)
-```
+Add a new column called "ParsedData"
+Apply the custom parsing function to each row's Attribute value
+Creates a record column containing the parsed month, category, and validation status
 
-## Real Usage Example in Power BI
 
-### Step 1: Set Parameters
-```m
-// Get last refresh time (from parameter table or file)
-LastRefreshTime = #datetime(2024, 7, 19, 23, 59, 59)
-```
+Step 5: Expand the Record Column
+m#"Expanded ParsedData" = Table.ExpandRecordColumn(#"Added Parsed Data", "ParsedData", 
+    {"Month", "Category", "IsValid"}, {"Month", "Category", "IsValid"}),
+Purpose:
 
-### Step 2: Load Customers Table with Schema Drift Handling
-```m
-// Connect to your Customers table
-CustomersSource = Sql.Database("ShopEasyDB", "Production", 
-    [Query = "SELECT * FROM Customers WHERE IsActive = 1"]
+Convert the record column into separate columns
+Extract Month, Category, and IsValid fields into individual columns
+Remove the original ParsedData record column
+
+Result:
+CustomerIDAttributeValueMonthCategoryIsValid1001Jan_Electronics100JanElectronicsTRUE
+
+Step 6: Filter Valid Data Only
+m#"Filtered Valid Data" = Table.SelectRows(#"Expanded ParsedData", each [IsValid] = true),
+Purpose:
+
+Remove any rows where the parsing failed (IsValid = false)
+Ensures we only work with properly formatted month-category combinations
+Provides data quality assurance
+
+
+Step 7: Clean Up Unnecessary Columns
+m#"Removed Columns" = Table.RemoveColumns(#"Filtered Valid Data", {"Attribute", "IsValid"}),
+Purpose:
+
+Remove the original "Attribute" column (no longer needed since we have Month and Category)
+Remove the "IsValid" column (used only for filtering)
+Keep only relevant columns for further processing
+
+
+Step 8: Create Enhanced Month Details Function
+mMonthDetails = (monthText as text) as record =>
+let
+    MonthMap = [
+        Jan = [Number = 1, Quarter = 1], Feb = [Number = 2, Quarter = 1], Mar = [Number = 3, Quarter = 1],
+        Apr = [Number = 4, Quarter = 2], May = [Number = 5, Quarter = 2], Jun = [Number = 6, Quarter = 2],
+        Jul = [Number = 7, Quarter = 3], Aug = [Number = 8, Quarter = 3], Sep = [Number = 9, Quarter = 3],
+        Oct = [Number = 10, Quarter = 4], Nov = [Number = 11, Quarter = 4], Dec = [Number = 12, Quarter = 4]
+    ],
+    Details = Record.Field(MonthMap, monthText)
+in
+    Details,
+Purpose:
+
+Create a function that converts month abbreviations to numbers and quarters
+Returns both month number (for sorting) and quarter (for seasonality analysis)
+Uses a record-based lookup for efficient conversion
+
+
+Step 9: Apply Month Details Function
+m#"Added Month Details" = Table.AddColumn(#"Removed Columns", "MonthDetails", 
+    each MonthDetails([Month])),
+Purpose:
+
+Add month number and quarter information to each row
+Creates a record column with month number and quarter
+
+
+Step 10: Expand Month Details
+m#"Expanded Month Details" = Table.ExpandRecordColumn(#"Added Month Details", "MonthDetails", 
+    {"Number", "Quarter"}, {"MonthNumber", "Quarter"}),
+Purpose:
+
+Extract month number and quarter into separate columns
+These will be used for sorting and seasonality calculations
+
+
+Step 11: Sort Data for Trend Calculations
+m#"Sorted Data" = Table.Sort(#"Expanded Month Details", {
+    {"CustomerID", Order.Ascending}, 
+    {"Category", Order.Ascending}, 
+    {"MonthNumber", Order.Ascending}
+}),
+Purpose:
+
+Sort data to ensure proper order for month-over-month calculations
+Primary sort: CustomerID (group by customer)
+Secondary sort: Category (group by category within customer)
+Tertiary sort: MonthNumber (chronological order within customer-category groups)
+
+
+Step 12: Calculate Advanced Trend Metrics
+m#"Added Trend Metrics" = Table.AddColumn(#"Sorted Data", "TrendMetrics", 
+    each 
+    let
+        CurrentCustomer = [CustomerID],
+        CurrentCategory = [Category],
+        CurrentMonth = [MonthNumber],
+        CurrentValue = [Value],
+        
+        // Get all data for current customer and category
+        CustomerCategoryData = Table.SelectRows(#"Sorted Data", each 
+            [CustomerID] = CurrentCustomer and [Category] = CurrentCategory),
+        
+        // Sort by month
+        SortedData = Table.Sort(CustomerCategoryData, {{"MonthNumber", Order.Ascending}}),
+        
+        // Find current row position
+        CurrentRowIndex = List.PositionOf(Table.Column(SortedData, "MonthNumber"), CurrentMonth),
+        
+        // Previous month calculations
+        PreviousValue = if CurrentRowIndex = 0 or CurrentRowIndex = -1 then null
+                       else Table.Column(SortedData, "Value"){CurrentRowIndex - 1},
+        
+        MoMGrowth = if PreviousValue = null or PreviousValue = 0 then null
+                   else (CurrentValue - PreviousValue) / PreviousValue,
+        
+        // Calculate average for the customer-category combination
+        AllValues = Table.Column(SortedData, "Value"),
+        AverageValue = List.Average(AllValues),
+        
+        // Performance vs average
+        VsAverage = if AverageValue = 0 then null else (CurrentValue - AverageValue) / AverageValue
+    in
+        [
+            MoM_Growth = MoMGrowth,
+            Vs_Average = VsAverage,
+            Is_Above_Average = CurrentValue > AverageValue
+        ]
 ),
+Purpose:
 
-// Apply incremental loading with schema drift protection
-ProcessedCustomers = LoadCustomersTableIncremental(
-    CustomersSource,
-    LastRefreshTime,
-    CustomersReference
-)
-```
+Calculate month-over-month growth for each customer-category combination
+Get all data for the current customer-category to find previous month's value
+Calculate performance vs. average for the customer-category combination
+Return multiple metrics in a record format
 
-### Step 3: Handle Related Tables
-```m
-// CustomerAddresses table with same protection
-CustomerAddressesSource = Sql.Database("ShopEasyDB", "Production", 
-    [Query = "SELECT * FROM CustomerAddresses"]
+Key Logic:
+
+Filter data for current customer and category
+Find the current month's position in the chronological sequence
+Get previous month's value for growth calculation
+Calculate average performance for comparison metrics
+
+
+Step 13: Expand Trend Metrics
+m#"Expanded Trend Metrics" = Table.ExpandRecordColumn(#"Added Trend Metrics", "TrendMetrics", 
+    {"MoM_Growth", "Vs_Average", "Is_Above_Average"}, 
+    {"Sales_Trend", "Vs_Category_Average", "Above_Average"}),
+Purpose:
+
+Extract the calculated metrics into separate columns
+Rename columns for clarity (MoM_Growth becomes Sales_Trend)
+Provide multiple performance indicators
+
+
+Step 14: Create Enhanced Seasonality Analysis
+m#"Added Enhanced Seasonality" = Table.AddColumn(#"Expanded Trend Metrics", "Seasonality_Details", 
+    each 
+    let
+        Q = [Quarter],
+        Month = [MonthNumber],
+        SeasonFlag = if Q = 4 then "High Season"
+                    else if Q = 1 then "Post-Holiday"
+                    else if List.Contains({5, 6, 7, 8}, Month) then "Summer"
+                    else "Regular Season",
+        
+        IsHolidayQuarter = Q = 4,
+        IsSummerSeason = List.Contains({6, 7, 8}, Month)
+    in
+        [
+            Seasonality_Flag = SeasonFlag,
+            Is_Holiday_Quarter = IsHolidayQuarter,
+            Is_Summer_Season = IsSummerSeason
+        ]
 ),
+Purpose:
 
-ProcessedAddresses = LoadCustomersTableIncremental(
-    CustomerAddressesSource,
-    LastRefreshTime, 
-    CustomerAddressesReference
-),
+Create detailed seasonality analysis beyond simple Q4 flagging
+Identify different seasonal patterns:
 
-// CustomerOrders table (incremental loading)
-CustomerOrdersSource = Sql.Database("ShopEasyDB", "Production", 
-    [Query = "SELECT * FROM CustomerOrders"]
-),
+Q4: High Season (Oct, Nov, Dec)
+Q1: Post-Holiday (Jan, Feb, Mar)
+Summer months: Special summer season
+Other months: Regular Season
 
-ProcessedOrders = LoadCustomersTableIncremental(
-    CustomerOrdersSource,
-    LastRefreshTime,
-    CustomerOrdersReference
-)
-```
 
-## Real Scenario: What Happens During Schema Changes
+Provide boolean flags for specific seasonal analysis
 
-### Scenario 1: IT Adds New Column to Customers Table
-**Date**: March 15, 2024  
-**Change**: IT adds `LoyaltyTierID` and `LoyaltyPoints` to Customers table
 
-**Without Schema Drift Protection:**
-```
-❌ Power BI refresh fails
-❌ Error: "Column 'LoyaltyTierID' not found in destination"
-❌ All customer reports break
-❌ Emergency meeting with IT team
-```
+Step 15: Expand Seasonality Details
+m#"Expanded Seasonality" = Table.ExpandRecordColumn(#"Added Enhanced Seasonality", "Seasonality_Details", 
+    {"Seasonality_Flag", "Is_Holiday_Quarter", "Is_Summer_Season"}, 
+    {"Seasonality_Flag", "Is_Holiday_Quarter", "Is_Summer_Season"}),
+Purpose:
 
-**With Schema Drift Protection:**
-```
-✅ Function detects new columns in Customers table
-✅ Ignores new columns (removes them during SelectColumns)
-✅ Existing customer reports continue working
-✅ BI team updates model when ready
-```
+Convert seasonality record into separate columns
+Provide multiple seasonality indicators for different analysis needs
 
-### Scenario 2: Your Team Updates Model Before IT
-**Date**: May 1, 2024  
-**Change**: You add GDPR fields to CustomersReference, but IT hasn't updated Customers table yet
 
-**Without Schema Drift Protection:**
-```
-❌ Power BI shows null values for GDPR columns
-❌ DAX measures that reference consent status break
-❌ Compliance reports show incorrect data
-```
+Step 16: Remove Helper Columns
+m#"Removed Helper Columns" = Table.RemoveColumns(#"Expanded Seasonality", {"MonthNumber", "Quarter"}),
+Purpose:
 
-**With Schema Drift Protection:**
-```
-✅ Function detects missing GDPR columns in source Customers table
-✅ Adds GDPRConsentStatus = "Pending" to all records
-✅ Adds ConsentDate = null until IT updates source
-✅ Compliance reports work with default values
-✅ Smooth transition when IT updates Customers table
-```
+Clean up intermediate columns used for calculations
+Keep only the final analysis columns needed for reporting
 
-### Scenario 3: IT Removes Column from Customers Table
-**Date**: May 15, 2024  
-**Change**: IT removes `PhoneNumber` from Customers table (moved to CustomerContacts)
 
-**Your Power BI Model Still Expects PhoneNumber:**
-```
-✅ Function detects missing PhoneNumber column
-✅ Adds PhoneNumber = null to all Customers records
-✅ Existing customer reports don't break
-✅ You can update model to join CustomerContacts table later
-```
-
-## Performance Impact with Real Numbers
-
-### ShopEasy Customer Database:
-- **Customers table**: 2.5 million records
-- **Daily new customers**: 1,500
-- **Daily customer updates**: 8,500 (profile changes, loyalty points, etc.)
-- **Total daily changes**: 10,000 records
-
-### Without Incremental Loading:
-- Load all 2.5 million Customers records daily
-- Process time: 45 minutes
-- Memory usage: 850 MB
-- Database load: High (full table scan)
-
-### With Incremental Loading:
-- Load only 10,000 changed Customers records
-- Process time: 2 minutes
-- Memory usage: 3.4 MB
-- Database load: Minimal (index scan on LastModifiedDate)
-
-## Interview Question Follow-ups
-
-**Q**: "What if the Customers table doesn't have a LastModifiedDate column?"  
-**A**: Use alternative strategies like CDC (Change Data Capture), triggers, or timestamp-based partitioning.
-
-**Q**: "How would you handle data type changes in the Customers table?"  
-**A**: Extend the function to compare data types and add conversion logic.
-
-**Q**: "What about handling deletes in the Customers table?"  
-**A**: Implement soft deletes with IsDeleted flag or use separate deletion tracking table.
-
-This concrete example with real table names (Customers, CustomerAddresses, CustomerOrders) makes it easy for candidates to understand the business context and relate to their own experience with customer data systems.
+Step 17: Set Final Data Types
+m#"Final Types" = Table.TransformColumnTypes(#"Removed Helper Columns", {
+    {"CustomerID", Int64.Type},
+    {"Value", Currency.Type},
+    {"Sales_Trend", Percentage.Type},
+    {"Vs_Category_Average", Percentage.Type},
+    {"Above_Average", type logical},
+    {"Is_Holiday_Quarter", type logical},
+    {"Is_Summer_Season", type logical}
+}),
