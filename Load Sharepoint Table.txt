@@ -5,50 +5,40 @@ let
     // Step 2: Get the web page content
     WebContent = try Web.Contents(SharePointURL) otherwise error "Failed to access SharePoint URL",
     
-    // Step 3: Parse HTML and extract all tables
-    HtmlDocument = Html.Document(WebContent),
-    AllTables = Html.Table(HtmlDocument, {{"tables", "table", each [Attributes]?}}, [RowSelector="tr"]),
+    // Step 3: Parse HTML and extract all tables using Web.Page
+    ParsedPage = Web.Page(WebContent),
+    AllTables = ParsedPage{[Kind="Table"]}[Data],
     
-    // Step 4: Function to extract table data and check for 'Policy Title' header
-    ExtractAndFilterTable = (tableElement as any) as table =>
+    // Step 4: Function to check for 'Policy Title' header and filter tables
+    ExtractAndFilterTable = (tableData as table) as table =>
         let
-            // Extract table data
-            TableData = try Html.Table(tableElement, null, [RowSelector="tr", ColumnSelector="td,th"]) otherwise #table({}, {}),
-            
             // Check if table has any data
-            HasData = Table.RowCount(TableData) > 0,
-            
-            // Get the first row (headers) if table has data
-            FirstRow = if HasData then Table.FirstN(TableData, 1) else #table({}, {}),
+            HasData = Table.RowCount(tableData) > 0,
             
             // Check if first column header contains 'Policy Title' (case-insensitive)
-            FirstColumnHeader = if HasData and Table.ColumnCount(FirstRow) > 0 then
+            FirstColumnHeader = if HasData and Table.ColumnCount(tableData) > 0 then
                 let
-                    FirstCell = Record.FieldValues(Table.First(FirstRow)){0}?,
-                    CleanedCell = if FirstCell is text then Text.Clean(Text.Trim(FirstCell)) else ""
+                    ColumnNames = Table.ColumnNames(tableData),
+                    FirstColumnName = ColumnNames{0}?,
+                    CleanedHeader = if FirstColumnName is text then Text.Clean(Text.Trim(FirstColumnName)) else ""
                 in
-                    Text.Contains(Text.Upper(CleanedCell), Text.Upper("Policy Title"))
+                    Text.Contains(Text.Upper(CleanedHeader), Text.Upper("Policy Title"))
             else false,
             
             // Return table only if it matches criteria
-            Result = if FirstColumnHeader then TableData else #table({}, {})
+            Result = if FirstColumnHeader then tableData else #table({}, {})
         in
             Result,
     
     // Step 5: Apply the function to all tables and filter out empty ones
-    ExtractedTables = Table.AddColumn(AllTables, "ExtractedData", each ExtractAndFilterTable([tables])),
-    FilteredTables = Table.SelectRows(ExtractedTables, each Table.RowCount([ExtractedData]) > 0),
+    FilteredTables = List.Select(AllTables, each Table.RowCount(ExtractAndFilterTable(_)) > 0),
+    ExtractedTables = List.Transform(FilteredTables, ExtractAndFilterTable),
     
     // Step 6: Function to standardize table structure
     StandardizeTable = (inputTable as table) as table =>
         let
-            // Promote first row as headers
-            PromotedHeaders = if Table.RowCount(inputTable) > 0 then 
-                Table.PromoteHeaders(inputTable, [PromoteAllScalars=true]) 
-            else inputTable,
-            
             // Clean column names (remove extra spaces, special characters)
-            CleanColumnNames = Table.TransformColumnNames(PromotedHeaders, each Text.Clean(Text.Trim(_))),
+            CleanColumnNames = Table.TransformColumnNames(inputTable, each Text.Clean(Text.Trim(_))),
             
             // Remove completely empty rows
             RemoveEmptyRows = Table.SelectRows(CleanColumnNames, each not List.IsEmpty(List.RemoveMatchingItems(Record.FieldValues(_), {"", null}))),
@@ -59,7 +49,7 @@ let
             AddSourceId,
     
     // Step 7: Standardize all filtered tables
-    StandardizedTables = Table.TransformColumns(FilteredTables, {{"ExtractedData", StandardizeTable}}),
+    StandardizedTables = List.Transform(ExtractedTables, StandardizeTable),
     
     // Step 8: Function to align table schemas before combining
     AlignTableSchemas = (tables as list) as list =>
@@ -84,9 +74,8 @@ let
         in
             List.Transform(tables, AddMissingColumns),
     
-    // Step 9: Extract list of tables and align schemas
-    TablesList = Table.Column(StandardizedTables, "ExtractedData"),
-    AlignedTables = if List.Count(TablesList) > 0 then AlignTableSchemas(TablesList) else {},
+    // Step 9: Align schemas of the standardized tables
+    AlignedTables = if List.Count(StandardizedTables) > 0 then AlignTableSchemas(StandardizedTables) else {},
     
     // Step 10: Combine all tables
     CombinedTable = if List.Count(AlignedTables) > 0 then
