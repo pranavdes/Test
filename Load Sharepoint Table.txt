@@ -1,0 +1,112 @@
+let
+    // Step 1: Define the SharePoint URL
+    SharePointURL = "YOUR_SHAREPOINT_URL_HERE",
+    
+    // Step 2: Get the web page content
+    WebContent = try Web.Contents(SharePointURL) otherwise error "Failed to access SharePoint URL",
+    
+    // Step 3: Parse HTML and extract all tables
+    HtmlDocument = Html.Document(WebContent),
+    AllTables = Html.Table(HtmlDocument, {{"tables", "table", each [Attributes]?}}, [RowSelector="tr"]),
+    
+    // Step 4: Function to extract table data and check for 'Policy Title' header
+    ExtractAndFilterTable = (tableElement as any) as table =>
+        let
+            // Extract table data
+            TableData = try Html.Table(tableElement, null, [RowSelector="tr", ColumnSelector="td,th"]) otherwise #table({}, {}),
+            
+            // Check if table has any data
+            HasData = Table.RowCount(TableData) > 0,
+            
+            // Get the first row (headers) if table has data
+            FirstRow = if HasData then Table.FirstN(TableData, 1) else #table({}, {}),
+            
+            // Check if first column header contains 'Policy Title' (case-insensitive)
+            FirstColumnHeader = if HasData and Table.ColumnCount(FirstRow) > 0 then
+                let
+                    FirstCell = Record.FieldValues(Table.First(FirstRow)){0}?,
+                    CleanedCell = if FirstCell is text then Text.Clean(Text.Trim(FirstCell)) else ""
+                in
+                    Text.Contains(Text.Upper(CleanedCell), Text.Upper("Policy Title"))
+            else false,
+            
+            // Return table only if it matches criteria
+            Result = if FirstColumnHeader then TableData else #table({}, {})
+        in
+            Result,
+    
+    // Step 5: Apply the function to all tables and filter out empty ones
+    ExtractedTables = Table.AddColumn(AllTables, "ExtractedData", each ExtractAndFilterTable([tables])),
+    FilteredTables = Table.SelectRows(ExtractedTables, each Table.RowCount([ExtractedData]) > 0),
+    
+    // Step 6: Function to standardize table structure
+    StandardizeTable = (inputTable as table) as table =>
+        let
+            // Promote first row as headers
+            PromotedHeaders = if Table.RowCount(inputTable) > 0 then 
+                Table.PromoteHeaders(inputTable, [PromoteAllScalars=true]) 
+            else inputTable,
+            
+            // Clean column names (remove extra spaces, special characters)
+            CleanColumnNames = Table.TransformColumnNames(PromotedHeaders, each Text.Clean(Text.Trim(_))),
+            
+            // Remove completely empty rows
+            RemoveEmptyRows = Table.SelectRows(CleanColumnNames, each not List.IsEmpty(List.RemoveMatchingItems(Record.FieldValues(_), {"", null}))),
+            
+            // Add a source table identifier
+            AddSourceId = Table.AddColumn(RemoveEmptyRows, "SourceTableId", each Number.Random(), type number)
+        in
+            AddSourceId,
+    
+    // Step 7: Standardize all filtered tables
+    StandardizedTables = Table.TransformColumns(FilteredTables, {{"ExtractedData", StandardizeTable}}),
+    
+    // Step 8: Function to align table schemas before combining
+    AlignTableSchemas = (tables as list) as list =>
+        let
+            // Get all unique column names across all tables
+            AllColumns = List.Distinct(List.Combine(List.Transform(tables, each Table.ColumnNames(_)))),
+            
+            // Function to add missing columns to a table
+            AddMissingColumns = (tbl as table) as table =>
+                let
+                    ExistingColumns = Table.ColumnNames(tbl),
+                    MissingColumns = List.Difference(AllColumns, ExistingColumns),
+                    AddColumns = List.Accumulate(
+                        MissingColumns,
+                        tbl,
+                        (state, col) => Table.AddColumn(state, col, each null, type any)
+                    ),
+                    // Reorder columns to match the standard order
+                    ReorderedTable = Table.ReorderColumns(AddColumns, AllColumns)
+                in
+                    ReorderedTable
+        in
+            List.Transform(tables, AddMissingColumns),
+    
+    // Step 9: Extract list of tables and align schemas
+    TablesList = Table.Column(StandardizedTables, "ExtractedData"),
+    AlignedTables = if List.Count(TablesList) > 0 then AlignTableSchemas(TablesList) else {},
+    
+    // Step 10: Combine all tables
+    CombinedTable = if List.Count(AlignedTables) > 0 then
+        Table.Combine(AlignedTables)
+    else
+        #table({"Message"}, {{"No tables found with 'Policy Title' header"}}),
+    
+    // Step 11: Final cleanup and type detection
+    FinalTable = if Table.HasColumns(CombinedTable, {"Message"}) then 
+        CombinedTable 
+    else
+        let
+            // Remove the source identifier column if not needed
+            RemoveSourceId = try Table.RemoveColumns(CombinedTable, {"SourceTableId"}) otherwise CombinedTable,
+            
+            // Auto-detect column types
+            DetectTypes = Table.TransformColumnTypes(RemoveSourceId, 
+                List.Transform(Table.ColumnNames(RemoveSourceId), each {_, type any}))
+        in
+            DetectTypes
+
+in
+    FinalTable
