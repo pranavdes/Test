@@ -1,0 +1,189 @@
+let
+    // Get all files from folder
+    Source = Folder.Files("C:\YourFolderPath"), // Replace with your actual folder path
+    
+    // Filter to only CSV files and exclude hidden/temp/open files
+    FilteredFiles = Table.SelectRows(Source, each 
+        // Only CSV files
+        Text.EndsWith([Extension], ".csv") and
+        // Exclude hidden files (starting with .)
+        not Text.StartsWith([Name], ".") and
+        // Exclude temp files (containing temp, tmp, or starting with ~)
+        not Text.Contains(Text.Lower([Name]), "temp") and
+        not Text.Contains(Text.Lower([Name]), "tmp") and
+        not Text.StartsWith([Name], "~") and
+        // Exclude Excel temp files (starting with ~$)
+        not Text.StartsWith([Name], "~$") and
+        // Only files that match YYYYMMDD_TIME_ pattern
+        Text.Length([Name]) >= 15 and // Minimum length for YYYYMMDD_HHMMSS_.csv
+        Text.Contains([Name], "_")
+    ),
+    
+    // Extract date and time information for each file
+    AddFileInfo = Table.AddColumn(FilteredFiles, "FileNameOnly", each Text.BeforeDelimiter([Name], ".")),
+    
+    // Extract date part (first 8 characters: YYYYMMDD)
+    AddDatePart = Table.AddColumn(AddFileInfo, "DatePart", each Text.Start([FileNameOnly], 8)),
+    
+    // Extract time part (between first underscore and second underscore)
+    AddTimePart = Table.AddColumn(AddDatePart, "TimePart", each 
+        let
+            AfterFirstUnderscore = Text.AfterDelimiter([FileNameOnly], "_"),
+            BeforeSecondUnderscore = Text.BeforeDelimiter(AfterFirstUnderscore, "_")
+        in
+            BeforeSecondUnderscore
+    ),
+    
+    // Parse date (YYYYMMDD format to date)
+    AddParsedDate = Table.AddColumn(AddTimePart, "ParsedDate", each 
+        Date.FromText(
+            Text.Start([DatePart], 4) & "-" & 
+            Text.Middle([DatePart], 4, 2) & "-" & 
+            Text.End([DatePart], 2)
+        ), type date),
+    
+    // Parse time (assuming HHMMSS format)
+    AddParsedTime = Table.AddColumn(AddParsedDate, "ParsedTime", each 
+        Time.FromText(
+            Text.Start([TimePart], 2) & ":" & 
+            Text.Middle([TimePart], 2, 2) & ":" & 
+            Text.Middle([TimePart], 4, 2)
+        ), type time),
+    
+    // Combine date and time into datetime
+    AddCombinedDateTime = Table.AddColumn(AddParsedTime, "CombinedDateTime", each 
+        DateTime.From([ParsedDate]) + #duration(0, Time.Hour([ParsedTime]), Time.Minute([ParsedTime]), Time.Second([ParsedTime])), 
+        type datetime),
+    
+    // Sort by CombinedDateTime in descending order
+    SortedFiles = Table.Sort(AddCombinedDateTime, {{"CombinedDateTime", Order.Descending}}),
+    
+    // Keep only the topmost row (most recent file)
+    LatestFile = Table.FirstN(SortedFiles, 1),
+    
+    // Get the content and metadata of the latest file
+    LatestFileContent = LatestFile{0}[Content],
+    LatestFileName = LatestFile{0}[Name],
+    LatestFileDate = LatestFile{0}[ParsedDate],
+    LatestFileTime = LatestFile{0}[ParsedTime],
+    LatestFileDateTime = LatestFile{0}[CombinedDateTime],
+    
+    // Parse the CSV content from the Content column
+    ParsedCSV = Csv.Document(LatestFileContent, [Delimiter=",", Columns=null, Encoding=65001, QuoteStyle=QuoteStyle.None]),
+    
+    // Promote headers (assuming first row contains headers)
+    PromotedHeaders = Table.PromoteHeaders(ParsedCSV, [PromoteAllScalars=true]),
+    
+    // Custom function to clean and standardize date columns
+    CleanDateFunction = (dateText as text) as nullable date =>
+        let
+            // Handle null, blank, or non-text values
+            CleanText = if dateText = null or dateText = "" then null 
+                       else Text.Trim(dateText),
+            
+            Result = if CleanText = null then null
+            else
+                let
+                    // Try to parse as full date first
+                    TryFullDate = try Date.FromText(CleanText),
+                    
+                    // If full date parsing succeeds, use it
+                    FullDateResult = if not TryFullDate[HasError] then TryFullDate[Value]
+                    else
+                        // Try to parse as month/year formats
+                        let
+                            // Check for MM/YY or MM/YYYY format (e.g., "05/2025", "10/25")
+                            TryMonthYearSlash = try 
+                                let
+                                    Parts = Text.Split(CleanText, "/"),
+                                    Month = Number.FromText(Parts{0}),
+                                    YearText = Parts{1},
+                                    Year = if Text.Length(YearText) = 2 
+                                          then Number.FromText("20" & YearText) 
+                                          else Number.FromText(YearText),
+                                    FirstDay = #date(Year, Month, 1),
+                                    LastDay = Date.EndOfMonth(FirstDay)
+                                in
+                                    LastDay,
+                            
+                            MonthYearSlashResult = if not TryMonthYearSlash[HasError] and List.Count(Text.Split(CleanText, "/")) = 2 
+                                                  then TryMonthYearSlash[Value]
+                            else
+                                // Check for "Month YYYY" or "Mon YY" format (e.g., "October 2025", "Oct 25")
+                                let
+                                    TryMonthNameYear = try
+                                        let
+                                            Parts = Text.Split(CleanText, " "),
+                                            MonthText = Parts{0},
+                                            YearText = Parts{1},
+                                            
+                                            // Convert month name/abbreviation to number
+                                            MonthNumber = if Text.Length(MonthText) <= 3 then
+                                                // Handle abbreviations
+                                                if Text.Lower(MonthText) = "jan" then 1
+                                                else if Text.Lower(MonthText) = "feb" then 2
+                                                else if Text.Lower(MonthText) = "mar" then 3
+                                                else if Text.Lower(MonthText) = "apr" then 4
+                                                else if Text.Lower(MonthText) = "may" then 5
+                                                else if Text.Lower(MonthText) = "jun" then 6
+                                                else if Text.Lower(MonthText) = "jul" then 7
+                                                else if Text.Lower(MonthText) = "aug" then 8
+                                                else if Text.Lower(MonthText) = "sep" then 9
+                                                else if Text.Lower(MonthText) = "oct" then 10
+                                                else if Text.Lower(MonthText) = "nov" then 11
+                                                else if Text.Lower(MonthText) = "dec" then 12
+                                                else error "Invalid month"
+                                            else
+                                                // Handle full month names
+                                                if Text.Lower(MonthText) = "january" then 1
+                                                else if Text.Lower(MonthText) = "february" then 2
+                                                else if Text.Lower(MonthText) = "march" then 3
+                                                else if Text.Lower(MonthText) = "april" then 4
+                                                else if Text.Lower(MonthText) = "may" then 5
+                                                else if Text.Lower(MonthText) = "june" then 6
+                                                else if Text.Lower(MonthText) = "july" then 7
+                                                else if Text.Lower(MonthText) = "august" then 8
+                                                else if Text.Lower(MonthText) = "september" then 9
+                                                else if Text.Lower(MonthText) = "october" then 10
+                                                else if Text.Lower(MonthText) = "november" then 11
+                                                else if Text.Lower(MonthText) = "december" then 12
+                                                else error "Invalid month",
+                                            
+                                            Year = if Text.Length(YearText) = 2 
+                                                  then Number.FromText("20" & YearText) 
+                                                  else Number.FromText(YearText),
+                                            
+                                            FirstDay = #date(Year, MonthNumber, 1),
+                                            LastDay = Date.EndOfMonth(FirstDay)
+                                        in
+                                            LastDay,
+                                    
+                                    MonthNameYearResult = if not TryMonthNameYear[HasError] and List.Count(Text.Split(CleanText, " ")) = 2
+                                                         then TryMonthNameYear[Value]
+                                                         else null
+                                in
+                                    MonthNameYearResult
+                        in
+                            MonthYearSlashResult
+                in
+                    FullDateResult
+        in
+            Result,
+    
+    // Apply the cleaning function to both date columns
+    CleanLastReviewDate = Table.TransformColumns(PromotedHeaders, {
+        {"Last Review/Approval Date", each CleanDateFunction(Text.From(_)), type nullable date}
+    }),
+    
+    CleanNextReviewDate = Table.TransformColumns(CleanLastReviewDate, {
+        {"Next Review Date", each CleanDateFunction(Text.From(_)), type nullable date}
+    }),
+    
+    // Add metadata columns from the filename
+    AddSourceFile = Table.AddColumn(CleanNextReviewDate, "Source File", each LatestFileName),
+    AddFileDate = Table.AddColumn(AddSourceFile, "File Date", each LatestFileDate, type date),
+    AddFileTime = Table.AddColumn(AddFileDate, "File Time", each LatestFileTime, type time),
+    AddFileDateTime = Table.AddColumn(AddFileTime, "File DateTime", each LatestFileDateTime, type datetime)
+
+in
+    AddFileDateTime
