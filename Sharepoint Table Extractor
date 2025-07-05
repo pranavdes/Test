@@ -2299,11 +2299,10 @@ def main():
             print("✓ Policy link extraction")
             print("✓ Type column extraction from h2 tags")
         
-        if not automation_mode:
-            ready = input(f"\nReady to proceed? (y/n, default=y): ").lower().strip()
-            if ready == 'n':
-                print("Cancelled by user.")
-                sys.exit(0)
+        ready = input(f"\nReady to proceed? (y/n, default=y): ").lower().strip()
+        if ready == 'n':
+            print("Cancelled by user.")
+            sys.exit(0)
     
     try:
         # Create and run the extractor
