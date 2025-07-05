@@ -1,0 +1,816 @@
+#!/usr/bin/env python3
+"""
+SharePoint Table Extractor
+==========================
+Extracts tables with 'Policy Title' header from SharePoint and saves as CSV
+
+This script connects to a SharePoint page, finds all tables where the first column
+header contains 'Policy Title', merges them, and saves the result as a timestamped CSV file.
+
+Requirements:
+    - requests, requests-ntlm, pandas, beautifulsoup4, selenium, lxml, html5lib
+    - Chrome browser and ChromeDriver for fallback authentication
+
+Author: Generated for SharePoint table extraction
+Date: 2025
+"""
+
+import requests
+from requests_ntlm import HttpNtlmAuth
+from requests.auth import HTTPBasicAuth
+import pandas as pd
+from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import WebDriverException, TimeoutException
+import datetime
+import os
+import sys
+import getpass
+import time
+import logging
+from pathlib import Path
+from urllib.parse import urlparse
+import warnings
+
+# Suppress unnecessary warnings
+warnings.filterwarnings('ignore', category=UserWarning)
+
+class SharePointTableExtractor:
+    """
+    A comprehensive SharePoint table extractor that handles authentication,
+    table parsing, and data merging with robust error handling.
+    """
+    
+    def __init__(self, sharepoint_url, output_dir="./"):
+        """
+        Initialize the SharePoint Table Extractor.
+        
+        Args:
+            sharepoint_url (str): The full URL to the SharePoint page containing tables
+            output_dir (str): Directory path where the CSV file will be saved
+                             Supports Windows paths with spaces (e.g., "C:\\My Documents\\Reports")
+        """
+        self.sharepoint_url = sharepoint_url
+        
+        # Convert output directory to Path object for proper Windows handling
+        try:
+            self.output_dir = Path(output_dir).resolve()
+            # Create directory if it doesn't exist
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            print(f"✓ Output directory confirmed: {self.output_dir}")
+        except Exception as e:
+            print(f"❌ Error setting up output directory '{output_dir}': {e}")
+            print("   Please check the path exists and you have write permissions")
+            sys.exit(1)
+        
+        # Initialize requests session for connection reuse
+        self.session = requests.Session()
+        
+        # Set up session headers to mimic a real browser
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1'
+        })
+    
+    def validate_sharepoint_url(self):
+        """
+        Validate that the SharePoint URL is properly formatted.
+        
+        Returns:
+            bool: True if URL is valid, False otherwise
+        """
+        try:
+            result = urlparse(self.sharepoint_url)
+            if not all([result.scheme, result.netloc]):
+                print(f"❌ Invalid URL format: {self.sharepoint_url}")
+                print("   URL should include protocol (https://) and domain")
+                return False
+            
+            if not result.scheme.lower() in ['http', 'https']:
+                print(f"❌ URL must use HTTP or HTTPS protocol: {self.sharepoint_url}")
+                return False
+                
+            print(f"✓ URL format validated: {self.sharepoint_url}")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error validating URL: {e}")
+            return False
+    
+    def authenticate_with_credentials(self, username=None, password=None, domain=None):
+        """
+        Attempt authentication with user-provided credentials using multiple methods.
+        
+        Args:
+            username (str, optional): Username for authentication
+            password (str, optional): Password for authentication  
+            domain (str, optional): Domain for NTLM authentication
+            
+        Returns:
+            str or None: HTML content if successful, None if all authentication methods fail
+        """
+        print("\n" + "="*50)
+        print("AUTHENTICATION REQUIRED")
+        print("="*50)
+        
+        try:
+            # Get credentials from user if not provided
+            if not username:
+                username = input("Enter username: ").strip()
+                if not username:
+                    print("❌ Username cannot be empty")
+                    return None
+            
+            if not password:
+                password = getpass.getpass("Enter password: ")
+                if not password:
+                    print("❌ Password cannot be empty")
+                    return None
+            
+            if not domain:
+                domain = input("Enter domain (press Enter to skip): ").strip()
+            
+            # Prepare username for authentication
+            if domain:
+                full_username = f"{domain}\\{username}"
+                print(f"Using domain authentication: {domain}\\{username}")
+            else:
+                full_username = username
+                print(f"Using basic authentication: {username}")
+        
+        except KeyboardInterrupt:
+            print("\n❌ Authentication cancelled by user")
+            return None
+        except Exception as e:
+            print(f"❌ Error getting credentials: {e}")
+            return None
+        
+        # Method 1: Try NTLM authentication (most common for SharePoint)
+        try:
+            print("\n🔐 Attempting NTLM authentication...")
+            self.session.auth = HttpNtlmAuth(full_username, password)
+            
+            response = self.session.get(self.sharepoint_url, timeout=30)
+            
+            if response.status_code == 200:
+                print("✓ NTLM authentication successful")
+                return response.text
+            elif response.status_code == 401:
+                print("❌ NTLM authentication failed: Invalid credentials")
+            elif response.status_code == 403:
+                print("❌ NTLM authentication failed: Access forbidden")
+            else:
+                print(f"❌ NTLM authentication failed: HTTP {response.status_code}")
+                
+        except requests.exceptions.Timeout:
+            print("❌ NTLM authentication failed: Request timeout (30 seconds)")
+        except requests.exceptions.ConnectionError as e:
+            print(f"❌ NTLM authentication failed: Connection error - {e}")
+        except Exception as e:
+            print(f"❌ NTLM authentication failed: {e}")
+        
+        # Method 2: Try Basic authentication
+        try:
+            print("🔐 Attempting Basic authentication...")
+            self.session.auth = HTTPBasicAuth(username, password)
+            
+            response = self.session.get(self.sharepoint_url, timeout=30)
+            
+            if response.status_code == 200:
+                print("✓ Basic authentication successful")
+                return response.text
+            elif response.status_code == 401:
+                print("❌ Basic authentication failed: Invalid credentials")
+            elif response.status_code == 403:
+                print("❌ Basic authentication failed: Access forbidden")
+            else:
+                print(f"❌ Basic authentication failed: HTTP {response.status_code}")
+                
+        except requests.exceptions.Timeout:
+            print("❌ Basic authentication failed: Request timeout (30 seconds)")
+        except requests.exceptions.ConnectionError as e:
+            print(f"❌ Basic authentication failed: Connection error - {e}")
+        except Exception as e:
+            print(f"❌ Basic authentication failed: {e}")
+        
+        print("❌ All authentication methods failed")
+        return None
+    
+    def get_html_with_browser_simulation(self):
+        """
+        Fallback method using Selenium WebDriver to simulate a real browser.
+        This method handles JavaScript-heavy pages and complex authentication flows.
+        
+        Returns:
+            str or None: HTML content if successful, None if browser simulation fails
+        """
+        print("\n🌐 Attempting browser simulation with Selenium...")
+        print("   This may take longer as it loads the full page...")
+        
+        driver = None
+        try:
+            # Configure Chrome options for headless browsing
+            chrome_options = Options()
+            chrome_options.add_argument("--headless")  # Run without GUI
+            chrome_options.add_argument("--no-sandbox")  # Bypass OS security model
+            chrome_options.add_argument("--disable-dev-shm-usage")  # Overcome limited resource problems
+            chrome_options.add_argument("--disable-gpu")  # Disable GPU hardware acceleration
+            chrome_options.add_argument("--window-size=1920,1080")  # Set window size
+            chrome_options.add_argument("--disable-extensions")  # Disable extensions
+            chrome_options.add_argument("--disable-plugins")  # Disable plugins
+            chrome_options.add_argument("--disable-images")  # Don't load images (faster)
+            chrome_options.add_argument("--disable-javascript")  # Disable JS if not needed
+            
+            # Create WebDriver instance
+            print("   Starting Chrome WebDriver...")
+            driver = webdriver.Chrome(options=chrome_options)
+            
+            # Set page load timeout
+            driver.set_page_load_timeout(60)
+            
+            # Navigate to SharePoint page
+            print(f"   Loading page: {self.sharepoint_url}")
+            driver.get(self.sharepoint_url)
+            
+            # Wait for page to fully load
+            print("   Waiting for page to load completely...")
+            WebDriverWait(driver, 30).until(
+                lambda d: d.execute_script("return document.readyState") == "complete"
+            )
+            
+            # Additional wait for SharePoint dynamic content
+            print("   Waiting for SharePoint content to render...")
+            time.sleep(5)
+            
+            # Check if authentication is required
+            current_url = driver.current_url.lower()
+            if 'login' in current_url or 'auth' in current_url or 'signin' in current_url:
+                print("❌ Browser simulation reached login page - manual authentication required")
+                print("   The page requires interactive login that cannot be automated")
+                return None
+            
+            # Get page source
+            html_content = driver.page_source
+            
+            # Validate that we got meaningful content
+            if len(html_content) < 1000:
+                print("❌ Browser simulation returned minimal content - possible access issue")
+                return None
+            
+            print("✓ Browser simulation successful")
+            print(f"   Retrieved {len(html_content):,} characters of content")
+            
+            return html_content
+            
+        except TimeoutException:
+            print("❌ Browser simulation failed: Page load timeout (60 seconds)")
+            print("   The SharePoint page took too long to load")
+        except WebDriverException as e:
+            print(f"❌ Browser simulation failed: WebDriver error - {e}")
+            print("   Please ensure Chrome and ChromeDriver are properly installed")
+        except Exception as e:
+            print(f"❌ Browser simulation failed: {e}")
+        finally:
+            # Always clean up the driver
+            if driver:
+                try:
+                    driver.quit()
+                    print("   WebDriver closed successfully")
+                except:
+                    pass
+        
+        return None
+    
+    def get_html_content(self):
+        """
+        Get HTML content from SharePoint using multiple fallback methods.
+        Tries direct access first, then authentication, then browser simulation.
+        
+        Returns:
+            str or None: HTML content if any method succeeds, None if all fail
+        """
+        print("\n" + "="*60)
+        print("RETRIEVING SHAREPOINT CONTENT")
+        print("="*60)
+        
+        # Validate URL format first
+        if not self.validate_sharepoint_url():
+            return None
+        
+        # Method 1: Try direct access without authentication
+        try:
+            print("🔗 Attempting direct access (no authentication)...")
+            response = self.session.get(self.sharepoint_url, timeout=30)
+            
+            if response.status_code == 200:
+                print("✓ Direct access successful")
+                print(f"   Retrieved {len(response.text):,} characters")
+                return response.text
+            elif response.status_code == 401:
+                print("⚠️  Direct access failed: Authentication required (401)")
+            elif response.status_code == 403:
+                print("⚠️  Direct access failed: Access forbidden (403)")
+            elif response.status_code == 404:
+                print("❌ Direct access failed: Page not found (404)")
+                print("   Please verify the SharePoint URL is correct")
+                return None
+            else:
+                print(f"⚠️  Direct access failed: HTTP {response.status_code}")
+                
+        except requests.exceptions.Timeout:
+            print("⚠️  Direct access failed: Request timeout (30 seconds)")
+        except requests.exceptions.ConnectionError as e:
+            print(f"⚠️  Direct access failed: Connection error - {e}")
+            print("   Please check your internet connection and URL")
+        except Exception as e:
+            print(f"⚠️  Direct access failed: {e}")
+        
+        # Method 2: Try with user authentication
+        html_content = self.authenticate_with_credentials()
+        if html_content:
+            return html_content
+        
+        # Method 3: Browser simulation fallback
+        return self.get_html_with_browser_simulation()
+    
+    def extract_tables_from_html(self, html_content):
+        """
+        Extract all tables from HTML where the first column header contains 'Policy Title'.
+        
+        Args:
+            html_content (str): The HTML content to parse
+            
+        Returns:
+            list: List of pandas DataFrames containing matching tables
+        """
+        print("\n" + "="*60)
+        print("EXTRACTING AND FILTERING TABLES")
+        print("="*60)
+        
+        matching_tables = []
+        
+        try:
+            # Parse HTML with BeautifulSoup
+            print("📄 Parsing HTML content...")
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            # Find all table elements
+            tables = soup.find_all('table')
+            print(f"✓ Found {len(tables)} table elements in HTML")
+            
+            if len(tables) == 0:
+                print("❌ No HTML tables found on the page")
+                print("   The page may not contain tables or may be dynamically generated")
+                return matching_tables
+            
+            # Process each table
+            for i, table in enumerate(tables):
+                table_num = i + 1
+                print(f"\n📊 Processing table {table_num}/{len(tables)}...")
+                
+                try:
+                    # Convert HTML table to pandas DataFrame
+                    # Try multiple parsers for better compatibility
+                    df = None
+                    for parser in ['lxml', 'html.parser', 'html5lib']:
+                        try:
+                            df_list = pd.read_html(str(table), header=0)
+                            if df_list:
+                                df = df_list[0]
+                                break
+                        except Exception:
+                            continue
+                    
+                    if df is None:
+                        print(f"   ⚠️  Could not parse table {table_num}")
+                        continue
+                    
+                    # Validate table has data
+                    if df.empty:
+                        print(f"   ⚠️  Table {table_num} is empty")
+                        continue
+                    
+                    if len(df.columns) == 0:
+                        print(f"   ⚠️  Table {table_num} has no columns")
+                        continue
+                    
+                    # Get and clean first column name
+                    first_col = str(df.columns[0]).strip()
+                    print(f"   First column header: '{first_col}'")
+                    
+                    # Check if first column contains 'policy title' (case-insensitive)
+                    if 'policy title' in first_col.lower():
+                        print(f"   ✓ MATCH FOUND! Table {table_num} matches criteria")
+                        print(f"   Table size: {len(df)} rows × {len(df.columns)} columns")
+                        
+                        # Clean and standardize the DataFrame
+                        cleaned_df = self.clean_dataframe(df, table_num)
+                        
+                        if not cleaned_df.empty:
+                            # Add source identifier for tracking
+                            cleaned_df['Source_Table_ID'] = f"Table_{table_num}"
+                            matching_tables.append(cleaned_df)
+                            print(f"   ✓ Table {table_num} added to results")
+                        else:
+                            print(f"   ⚠️  Table {table_num} became empty after cleaning")
+                    else:
+                        print(f"   ❌ Table {table_num} does not match - skipping")
+                    
+                except Exception as e:
+                    print(f"   ❌ Error processing table {table_num}: {e}")
+                    continue
+            
+            print(f"\n✓ Table extraction complete!")
+            print(f"✓ Found {len(matching_tables)} tables matching 'Policy Title' criteria")
+            
+        except Exception as e:
+            print(f"❌ Critical error during table extraction: {e}")
+            print("   This may indicate malformed HTML or parsing issues")
+        
+        return matching_tables
+    
+    def clean_dataframe(self, df, table_id):
+        """
+        Clean and standardize a DataFrame by removing empty data and formatting issues.
+        
+        Args:
+            df (pandas.DataFrame): The DataFrame to clean
+            table_id (int): Table identifier for logging
+            
+        Returns:
+            pandas.DataFrame: Cleaned DataFrame
+        """
+        try:
+            original_shape = df.shape
+            print(f"      Cleaning table {table_id} (original: {original_shape[0]} rows × {original_shape[1]} cols)")
+            
+            # Remove rows that are completely empty
+            df = df.dropna(how='all')
+            
+            # Remove columns that are completely empty
+            df = df.dropna(axis=1, how='all')
+            
+            # Clean column names - remove extra whitespace and special characters
+            df.columns = [str(col).strip().replace('\n', ' ').replace('\r', ' ') for col in df.columns]
+            
+            # Remove duplicate rows
+            initial_rows = len(df)
+            df = df.drop_duplicates()
+            duplicates_removed = initial_rows - len(df)
+            
+            # Reset index
+            df = df.reset_index(drop=True)
+            
+            # Fill NaN values with empty string for consistency
+            df = df.fillna('')
+            
+            final_shape = df.shape
+            print(f"      Cleaned table {table_id} (final: {final_shape[0]} rows × {final_shape[1]} cols)")
+            
+            if duplicates_removed > 0:
+                print(f"      Removed {duplicates_removed} duplicate rows")
+            
+            return df
+            
+        except Exception as e:
+            print(f"      ❌ Error cleaning table {table_id}: {e}")
+            return pd.DataFrame()  # Return empty DataFrame on error
+    
+    def merge_tables(self, tables_list):
+        """
+        Merge multiple tables with potentially different schemas into a single DataFrame.
+        
+        Args:
+            tables_list (list): List of pandas DataFrames to merge
+            
+        Returns:
+            pandas.DataFrame: Single merged DataFrame with unified schema
+        """
+        print("\n" + "="*60)
+        print("MERGING TABLES")
+        print("="*60)
+        
+        if not tables_list:
+            print("❌ No tables to merge")
+            return pd.DataFrame()
+        
+        if len(tables_list) == 1:
+            print("✓ Only one table found - no merging needed")
+            return tables_list[0]
+        
+        try:
+            print(f"📊 Merging {len(tables_list)} tables...")
+            
+            # Analyze schemas of all tables
+            print("\n   Analyzing table schemas...")
+            all_columns = set()
+            table_info = []
+            
+            for i, df in enumerate(tables_list):
+                cols = list(df.columns)
+                all_columns.update(cols)
+                table_info.append({
+                    'id': i + 1,
+                    'rows': len(df),
+                    'cols': len(cols),
+                    'columns': cols
+                })
+                print(f"   Table {i+1}: {len(df)} rows × {len(cols)} columns")
+            
+            # Create unified column list
+            all_columns = sorted(list(all_columns))
+            print(f"\n   Total unique columns across all tables: {len(all_columns)}")
+            
+            # Standardize all tables to have the same columns
+            print("   Standardizing table schemas...")
+            standardized_tables = []
+            
+            for i, df in enumerate(tables_list):
+                try:
+                    # Add missing columns with empty values
+                    for col in all_columns:
+                        if col not in df.columns:
+                            df[col] = ''
+                    
+                    # Reorder columns to match standard order
+                    df = df[all_columns]
+                    standardized_tables.append(df)
+                    print(f"   ✓ Standardized table {i+1}")
+                    
+                except Exception as e:
+                    print(f"   ❌ Error standardizing table {i+1}: {e}")
+                    continue
+            
+            if not standardized_tables:
+                print("❌ No tables could be standardized")
+                return pd.DataFrame()
+            
+            # Concatenate all standardized tables
+            print("   Concatenating tables...")
+            merged_df = pd.concat(standardized_tables, ignore_index=True)
+            
+            # Final cleanup
+            merged_df = merged_df.reset_index(drop=True)
+            
+            print(f"\n✓ Successfully merged tables!")
+            print(f"✓ Final result: {len(merged_df)} rows × {len(merged_df.columns)} columns")
+            print(f"✓ Column names: {', '.join(merged_df.columns[:5])}{'...' if len(merged_df.columns) > 5 else ''}")
+            
+            return merged_df
+            
+        except Exception as e:
+            print(f"❌ Critical error during table merging: {e}")
+            print("   This may indicate incompatible table structures")
+            return pd.DataFrame()
+    
+    def generate_filename(self):
+        """
+        Generate a timestamped filename for the output CSV file.
+        Format: YYYYMMDD_HHMMSS_Policy & Procedures Status.csv
+        
+        Returns:
+            Path: Complete file path with timestamp
+        """
+        try:
+            now = datetime.datetime.now()
+            timestamp = now.strftime("%Y%m%d_%H%M%S")
+            filename = f"{timestamp}_Policy & Procedures Status.csv"
+            
+            # Use Path object for proper Windows path handling
+            full_path = self.output_dir / filename
+            
+            print(f"📁 Generated filename: {filename}")
+            print(f"📁 Full path: {full_path}")
+            
+            return full_path
+            
+        except Exception as e:
+            print(f"❌ Error generating filename: {e}")
+            # Fallback to basic filename
+            return self.output_dir / "Policy_Procedures_Status.csv"
+    
+    def save_to_csv(self, df, filepath):
+        """
+        Save DataFrame to CSV file with proper error handling and validation.
+        
+        Args:
+            df (pandas.DataFrame): DataFrame to save
+            filepath (Path): Path where the CSV file should be saved
+            
+        Returns:
+            bool: True if save successful, False if failed
+        """
+        print("\n" + "="*60)
+        print("SAVING DATA TO CSV")
+        print("="*60)
+        
+        try:
+            # Validate DataFrame
+            if df.empty:
+                print("❌ Cannot save empty DataFrame")
+                return False
+            
+            # Ensure output directory exists
+            filepath.parent.mkdir(parents=True, exist_ok=True)
+            print(f"✓ Output directory confirmed: {filepath.parent}")
+            
+            # Check write permissions
+            try:
+                test_file = filepath.parent / "test_write_permission.tmp"
+                test_file.write_text("test")
+                test_file.unlink()
+                print("✓ Write permissions confirmed")
+            except Exception as e:
+                print(f"❌ No write permission to directory: {e}")
+                return False
+            
+            # Save DataFrame to CSV
+            print(f"💾 Saving data to: {filepath}")
+            df.to_csv(
+                filepath, 
+                index=False,  # Don't save row indices
+                encoding='utf-8-sig',  # UTF-8 with BOM for Excel compatibility
+                escapechar='\\',  # Escape special characters
+                quoting=1  # Quote all fields
+            )
+            
+            # Verify file was created and has content
+            if filepath.exists():
+                file_size = filepath.stat().st_size
+                print(f"✓ File saved successfully!")
+                print(f"✓ File size: {file_size:,} bytes")
+                print(f"✓ Total rows saved: {len(df):,}")
+                print(f"✓ Total columns saved: {len(df.columns)}")
+                print(f"✓ File location: {filepath}")
+                
+                # Display column summary
+                print("\n📋 Column Summary:")
+                for i, col in enumerate(df.columns[:10]):  # Show first 10 columns
+                    non_empty = df[col].astype(str).str.strip().ne('').sum()
+                    print(f"   {i+1:2d}. {col}: {non_empty:,} non-empty values")
+                
+                if len(df.columns) > 10:
+                    print(f"   ... and {len(df.columns) - 10} more columns")
+                
+                return True
+            else:
+                print("❌ File was not created - unknown error")
+                return False
+            
+        except PermissionError:
+            print(f"❌ Permission denied: Cannot write to {filepath}")
+            print("   Please check file/directory permissions or close the file if it's open")
+            return False
+        except FileNotFoundError:
+            print(f"❌ Directory not found: {filepath.parent}")
+            print("   Please verify the output directory path")
+            return False
+        except Exception as e:
+            print(f"❌ Error saving CSV file: {e}")
+            print(f"   Attempted to save to: {filepath}")
+            return False
+    
+    def run(self):
+        """
+        Main execution method that orchestrates the entire extraction process.
+        
+        Returns:
+            bool: True if extraction completed successfully, False if any step failed
+        """
+        print("=" * 80)
+        print("SHAREPOINT TABLE EXTRACTOR")
+        print("=" * 80)
+        print(f"🎯 Target URL: {self.sharepoint_url}")
+        print(f"📁 Output Directory: {self.output_dir}")
+        print(f"🕒 Started at: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print("=" * 80)
+        
+        try:
+            # Step 1: Get HTML content from SharePoint
+            html_content = self.get_html_content()
+            if not html_content:
+                print("\n❌ EXTRACTION FAILED: Could not retrieve HTML content")
+                print("💡 Troubleshooting tips:")
+                print("   - Verify the SharePoint URL is correct and accessible")
+                print("   - Check your network connection")
+                print("   - Ensure you have proper access permissions")
+                print("   - Try accessing the URL in your web browser first")
+                return False
+            
+            print(f"✓ HTML content retrieved successfully ({len(html_content):,} characters)")
+            
+            # Step 2: Extract matching tables
+            matching_tables = self.extract_tables_from_html(html_content)
+            if not matching_tables:
+                print("\n❌ EXTRACTION FAILED: No tables found with 'Policy Title' header")
+                print("💡 This could mean:")
+                print("   - The page doesn't contain tables with 'Policy Title' in the first column")
+                print("   - The tables are dynamically loaded and require JavaScript")
+                print("   - The table structure is different than expected")
+                print("   - Authentication is required to view the content")
+                return False
+            
+            # Step 3: Merge all matching tables
+            merged_df = self.merge_tables(matching_tables)
+            if merged_df.empty:
+                print("\n❌ EXTRACTION FAILED: Table merging resulted in empty data")
+                print("💡 This could indicate:")
+                print("   - All found tables were empty or invalid")
+                print("   - Data cleaning removed all content")
+                print("   - Schema conflicts prevented merging")
+                return False
+            
+            # Step 4: Save merged data to CSV
+            output_filepath = self.generate_filename()
+            success = self.save_to_csv(merged_df, output_filepath)
+            
+            if success:
+                print("\n" + "=" * 80)
+                print("🎉 EXTRACTION COMPLETED SUCCESSFULLY!")
+                print("=" * 80)
+                print(f"✅ Tables found and merged: {len(matching_tables)}")
+                print(f"✅ Total data rows: {len(merged_df):,}")
+                print(f"✅ Total columns: {len(merged_df.columns)}")
+                print(f"✅ Output file: {output_filepath}")
+                print(f"✅ Completed at: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                print("=" * 80)
+                return True
+            else:
+                print("\n❌ EXTRACTION FAILED: Could not save data to CSV")
+                print("💡 Check file permissions and disk space")
+                return False
+                
+        except KeyboardInterrupt:
+            print("\n\n⚠️  EXTRACTION CANCELLED: User interrupted the process")
+            return False
+        except Exception as e:
+            print(f"\n❌ CRITICAL ERROR: Unexpected error during extraction: {e}")
+            print("💡 Please report this error with the full error message")
+            return False
+
+def main():
+    """
+    Main function to configure and run the SharePoint table extractor.
+    Modify the configuration variables below for your specific use case.
+    """
+    # ========================================
+    # CONFIGURATION - UPDATE THESE VALUES
+    # ========================================
+    
+    # SharePoint URL - Replace with your actual SharePoint page URL
+    SHAREPOINT_URL = "https://your-sharepoint-site.com/path/to/page"
+    
+    # Output directory - Supports Windows paths with spaces
+    # Examples:
+    # Windows: r"C:\Users\YourName\Documents\SharePoint Reports"
+    # Windows UNC: r"\\server\share\Reports"
+    # Linux/Mac: "/home/username/reports"
+    OUTPUT_DIR = r"C:\Users\YourName\Documents\SharePoint Reports"
+    
+    # ========================================
+    # VALIDATION AND EXECUTION
+    # ========================================
+    
+    print("SharePoint Table Extractor v2.0")
+    print("-" * 40)
+    
+    # Validate configuration
+    if "your-sharepoint-site.com" in SHAREPOINT_URL:
+        print("❌ Configuration Error: Please update SHAREPOINT_URL with your actual SharePoint URL")
+        print("   Example: https://company.sharepoint.com/sites/sitename/pages/pagename.aspx")
+        input("Press Enter to exit...")
+        return
+    
+    if not SHAREPOINT_URL.strip():
+        print("❌ Configuration Error: SHAREPOINT_URL cannot be empty")
+        input("Press Enter to exit...")
+        return
+    
+    try:
+        # Create and run the extractor
+        extractor = SharePointTableExtractor(SHAREPOINT_URL, OUTPUT_DIR)
+        success = extractor.run()
+        
+        # Final status message
+        if success:
+            print("\n🎊 All done! Your Policy & Procedures data is ready.")
+        else:
+            print("\n💔 Extraction failed. Please check the error messages above.")
+            
+    except Exception as e:
+        print(f"\n❌ Fatal error: {e}")
+        print("Please check your configuration and try again.")
+    
+    # Pause before exit so user can read messages
+    input("\nPress Enter to exit...")
+
+if __name__ == "__main__":
+    main()
