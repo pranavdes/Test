@@ -558,7 +558,8 @@ class SharePointTableExtractor:
             # Show command line parameter for next time
             if show_command and user_input:
                 param_name = prompt.lower().replace(':', '').replace(' ', '_').replace('?', '')
-                print(f"💡 For automation, use: --{param_name} \"{user_input}\"")
+                command_example = f"--{param_name} \"{user_input}\""
+                print(f"💡 For automation, use: {command_example}")
             
             return user_input
         except KeyboardInterrupt:
@@ -615,7 +616,8 @@ class SharePointTableExtractor:
                     return None
                 else:
                     if self.is_onpremise:
-                        username = self.get_user_input_with_fallback("Enter username (domain\\user or user@domain.com): ")
+                        username_prompt = "Enter username (domain\\user or user@domain.com): "
+                        username = self.get_user_input_with_fallback(username_prompt)
                     else:
                         username = self.get_user_input_with_fallback("Enter username/email: ")
                     if not username:
@@ -754,7 +756,8 @@ class SharePointTableExtractor:
                     # For automation mode, you might want to configure a default domain
                     # email = f"{username_part}@company.com"  # Customize this
                     if not self.automation_mode:
-                        email = self.get_user_input_with_fallback(f"Convert '{username_part}' to email format (or press Enter to skip): ", None, True)
+                        convert_prompt = f"Convert '{username_part}' to email format (or press Enter to skip): "
+                        email = self.get_user_input_with_fallback(convert_prompt, None, True)
             
             if not email and not self.automation_mode:
                 email = self.get_user_input_with_fallback("Enter email address for auto-fill (or press Enter to skip): ", None, True)
@@ -2326,7 +2329,7 @@ def main():
                 elif is_onpremise and not automation_mode:
                     print("💡 For future scheduled runs, Windows Authentication may work automatically")
         else:
-                if not self.automation_mode or not args.quiet:
+                if not automation_mode or not args.quiet:
                     print("\n💔 Extraction failed. Check error messages above.")
                     
                     # Generate command example for failed runs
@@ -2345,7 +2348,7 @@ def main():
                         print(f"   • Try with credentials: --username \"{domain_user_example}\" --password \"pass\"")
                         print("   • Check if Windows Authentication is enabled")
             
-            sys.exit(1)
+        sys.exit(1)
             
     except Exception as e:
         print(f"\n❌ Fatal error: {e}")
