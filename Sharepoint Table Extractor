@@ -7,16 +7,34 @@ Extracts tables with 'Policy Title' header from SharePoint and saves as CSV
 This script connects to a SharePoint page, finds all tables where the first column
 header contains 'Policy Title', merges them, and saves the result as a timestamped CSV file.
 
+Supports both interactive and automated (scheduled) execution modes.
+
 Requirements:
-    - requests, requests-ntlm, pandas, beautifulsoup4, selenium, lxml, html5lib
+    - requests, requests-ntlm, pandas, beautifulsoup4, lxml, html5lib
     - Chrome browser and ChromeDriver for fallback authentication
 
 Author: Generated for SharePoint table extraction
 Date: 2025
 """
 
+# Standard library imports
+import datetime
+import os
+import sys
+import getpass
+import time
+import logging
+import argparse
+import json
+from pathlib import Path
+from urllib.parse import urlparse, urljoin
+import warnings
+
+# Third-party imports
 import requests
 from requests.auth import HTTPBasicAuth
+import pandas as pd
+from bs4 import BeautifulSoup
 
 # Try to import optional NTLM authentication (not always needed)
 try:
@@ -28,8 +46,6 @@ except ImportError:
     NTLM_AVAILABLE = False
     print("⚠️  NTLM authentication not available (requests-ntlm not installed)")
     print("   Basic authentication and browser simulation will still work")
-import pandas as pd
-from bs4 import BeautifulSoup
 
 # Try to import optional Selenium for browser simulation (not always needed)
 try:
@@ -49,15 +65,6 @@ except ImportError:
     SELENIUM_AVAILABLE = False
     print("⚠️  Browser simulation not available (selenium not installed)")
     print("   Direct access and authentication will still work")
-import datetime
-import os
-import sys
-import getpass
-import time
-import logging
-from pathlib import Path
-from urllib.parse import urlparse
-import warnings
 
 # Suppress unnecessary warnings
 warnings.filterwarnings('ignore', category=UserWarning)
@@ -221,6 +228,61 @@ class SharePointTableExtractor:
             # Fall back to regular pandas parsing
             return pd.read_html(str(table_soup), header=0)[0] if pd.read_html(str(table_soup)) else pd.DataFrame()
     
+    def add_link_columns_to_dataframe(self, df, table_soup):
+        """
+        Add link columns to an existing DataFrame based on the table HTML structure.
+        
+        Args:
+            df (pandas.DataFrame): The original DataFrame
+            table_soup: BeautifulSoup table element
+            
+        Returns:
+            pandas.DataFrame: DataFrame with added link columns
+        """
+        try:
+            # Extract all data rows with links
+            data_rows = table_soup.find_all('tr')[1:]  # Skip header row
+            
+            # Create link data for each column
+            link_columns = {}
+            for col_idx, col_name in enumerate(df.columns):
+                column_links = []
+                
+                for row in data_rows:
+                    cells = row.find_all(['td', 'th'])
+                    if col_idx < len(cells):
+                        cell = cells[col_idx]
+                        links = cell.find_all('a', href=True)
+                        if links:
+                            link_url = links[0].get('href', '')
+                            # Convert relative URLs to absolute URLs
+                            if link_url and not link_url.startswith(('http://', 'https://')):
+                                base_url = f"{urlparse(self.sharepoint_url).scheme}://{urlparse(self.sharepoint_url).netloc}"
+                                link_url = urljoin(base_url, link_url)
+                            column_links.append(link_url)
+                        else:
+                            column_links.append('')
+                    else:
+                        column_links.append('')
+                
+                # Add link column if any links were found
+                if any(column_links):
+                    link_column_name = f"{col_name} Link"
+                    # Ensure we have the right number of link entries
+                    while len(column_links) < len(df):
+                        column_links.append('')
+                    link_columns[link_column_name] = column_links[:len(df)]
+            
+            # Add link columns to DataFrame
+            for link_col_name, link_data in link_columns.items():
+                df[link_col_name] = link_data
+            
+            return df
+            
+        except Exception as e:
+            if not self.automation_mode:
+                print(f"      ⚠️  Error adding link columns: {e}")
+            return df
     
     def validate_sharepoint_url(self):
         """
@@ -283,29 +345,6 @@ class SharePointTableExtractor:
         except KeyboardInterrupt:
             print("\n❌ Cancelled by user")
             return None
-        """
-        Validate that the SharePoint URL is properly formatted.
-        
-        Returns:
-            bool: True if URL is valid, False otherwise
-        """
-        try:
-            result = urlparse(self.sharepoint_url)
-            if not all([result.scheme, result.netloc]):
-                print(f"❌ Invalid URL format: {self.sharepoint_url}")
-                print("   URL should include protocol (https://) and domain")
-                return False
-            
-            if not result.scheme.lower() in ['http', 'https']:
-                print(f"❌ URL must use HTTP or HTTPS protocol: {self.sharepoint_url}")
-                return False
-                
-            print(f"✓ URL format validated: {self.sharepoint_url}")
-            return True
-            
-        except Exception as e:
-            print(f"❌ Error validating URL: {e}")
-            return False
     
     def authenticate_with_credentials(self, username=None, password=None, domain=None):
         """
@@ -784,6 +823,8 @@ class SharePointTableExtractor:
             
         except Exception as e:
             return False
+    
+    def detect_authentication_completion(self, driver):
         """
         Automatically detect when authentication is complete by monitoring URL and page content.
         
@@ -887,39 +928,64 @@ class SharePointTableExtractor:
                 return user_input != 'n'
             except KeyboardInterrupt:
                 return False
+    
+    def get_html_with_browser_simulation(self):
         """
-        Browser simulation method optimized for Office 365 authentication.
-        This method opens a browser window where the user can authenticate normally
-        with their Office 365 credentials.
+        Browser simulation method that works for both Office 365 and on-premise SharePoint.
+        Supports automation mode with automatic authentication detection.
         
         Returns:
             str or None: HTML content if successful, None if browser simulation fails
         """
         if not SELENIUM_AVAILABLE:
-            print("\n❌ Browser simulation not available")
-            print("   Selenium is not installed. Install with: python -m pip install selenium")
-            print("   You'll also need Chrome browser and ChromeDriver")
+            if not self.automation_mode:
+                print("\n❌ Browser simulation not available")
+                print("   Selenium is not installed. Install with: python -m pip install selenium")
+                print("   You'll also need Chrome browser and ChromeDriver")
             return None
         
-        print("\n🌐 Starting browser simulation for Office 365 authentication...")
-        print("   This will open a browser window where you can log in normally")
+        if not self.automation_mode:
+            if self.is_onpremise:
+                print(f"\n🌐 Starting browser simulation for on-premise SharePoint...")
+                print("   This typically handles Windows Authentication automatically")
+            else:
+                print(f"\n🌐 Starting browser simulation for Office 365 authentication...")
+                print("   This will open a browser window where you can log in normally")
         
-        # Ask user if they want to see the browser or run headless
-        try:
-            show_browser = input("Show browser window for authentication? (y/n, default=y): ").lower().strip()
-            if show_browser == 'n':
-                headless = True
+        # Determine browser visibility
+        if self.browser_visible is not None:
+            headless = not self.browser_visible
+        elif self.automation_mode:
+            # In automation mode, default to headless for on-premise, visible for Office 365
+            headless = self.is_onpremise
+        else:
+            # Ask user for preference
+            try:
+                if self.is_onpremise:
+                    default_visible = "n"  # On-premise often works headless
+                    show_browser = self.get_user_input_with_fallback(f"Show browser window? (y/n, default={default_visible}): ", default_visible, False)
+                    if show_browser == "":
+                        show_browser = default_visible
+                else:
+                    default_visible = "y"  # Office 365 usually needs visible browser
+                    show_browser = self.get_user_input_with_fallback(f"Show browser window for authentication? (y/n, default={default_visible}): ", default_visible, False)
+                    if show_browser == "":
+                        show_browser = default_visible
+                
+                headless = (show_browser == 'n')
+            except KeyboardInterrupt:
+                print("\n❌ Cancelled by user")
+                return None
+        
+        if not self.automation_mode:
+            if headless:
                 print("   Running in headless mode...")
             else:
-                headless = False
-                print("   Browser window will be visible for authentication...")
-        except KeyboardInterrupt:
-            print("\n❌ Cancelled by user")
-            return None
+                print("   Browser window will be visible...")
         
         driver = None
         try:
-            # Configure Chrome options for Office 365 compatibility
+            # Configure Chrome options based on environment
             chrome_options = Options()
             if headless:
                 chrome_options.add_argument("--headless")
@@ -929,72 +995,123 @@ class SharePointTableExtractor:
             chrome_options.add_argument("--window-size=1920,1080")
             chrome_options.add_argument("--disable-extensions")
             chrome_options.add_argument("--disable-plugins")
-            # DO NOT disable JavaScript - Office 365 authentication requires it
+            
+            # For on-premise SharePoint, enable Windows Authentication
+            if self.is_onpremise:
+                chrome_options.add_argument("--auth-server-whitelist=*")
+                chrome_options.add_argument("--auth-negotiate-delegate-whitelist=*")
+                chrome_options.add_argument("--enable-auth-negotiate-port")
+            
+            # Enable JavaScript - both Office 365 and modern SharePoint require it
             chrome_options.add_argument("--disable-web-security")
             chrome_options.add_argument("--allow-running-insecure-content")
             
             # Create WebDriver instance
-            print("   Starting Chrome WebDriver...")
+            if not self.automation_mode:
+                print("   Starting Chrome WebDriver...")
             driver = webdriver.Chrome(options=chrome_options)
             
-            # Set longer timeouts for Office 365 authentication
-            driver.set_page_load_timeout(120)  # 2 minutes for initial load
+            # Set timeouts based on environment
+            driver.set_page_load_timeout(self.timeouts['page_load_timeout'])
             
             # Navigate to SharePoint page
-            print(f"   Loading SharePoint page: {self.sharepoint_url}")
+            if not self.automation_mode:
+                print(f"   Loading SharePoint page: {self.sharepoint_url}")
             driver.get(self.sharepoint_url)
             
-            # Check if we're redirected to Office 365 login
+            # Check for authentication redirects
             current_url = driver.current_url.lower()
+            
+            # Office 365 authentication detection
             if any(auth_indicator in current_url for auth_indicator in 
                    ['login.microsoftonline.com', 'login.microsoft.com', 'accounts.microsoft.com', 
                     'login.windows.net', 'sts.windows.net']):
                 
-                print("✓ Detected Office 365 authentication redirect")
+                if not self.automation_mode:
+                    print("✓ Detected Office 365 authentication redirect")
                 
-                if not headless:
+                # Try automated authentication first
+                auth_automated = self.automate_authentication_inputs(driver)
+                
+                if not auth_automated and not headless and not self.automation_mode:
+                    # Fall back to manual authentication with user guidance
                     print("\n" + "="*60)
                     print("🔐 OFFICE 365 AUTHENTICATION REQUIRED")
                     print("="*60)
-                    print("Please complete authentication in the browser window:")
+                    print("Automated authentication failed. Please complete manually:")
                     print("1. Enter your office email address")
                     print("2. Complete any additional authentication steps (MFA, etc.)")
                     print("3. Wait for redirect back to SharePoint")
                     print("4. DO NOT close the browser window")
                     print("="*60)
-                    
-                    # Wait for user to complete authentication
-                    print("\nWaiting for authentication to complete...")
-                    print("Press Enter once you've successfully logged in and can see the SharePoint page...")
-                    input()
-                else:
-                    print("❌ Headless mode cannot handle interactive Office 365 authentication")
-                    print("   Please run again with browser window visible (answer 'y' to show browser)")
+                
+                # Wait for authentication to complete automatically
+                auth_successful = self.wait_for_authentication_completion(driver)
+                if not auth_successful:
                     return None
+                    
+            # On-premise authentication detection
+            elif any(auth_indicator in current_url for auth_indicator in 
+                     ['login', 'auth', 'signin', 'logon']) and self.is_onpremise:
+                
+                if not self.automation_mode:
+                    print("✓ Detected on-premise authentication page")
+                
+                # Try automated authentication first
+                auth_automated = self.automate_authentication_inputs(driver)
+                
+                if not auth_automated and not headless and not self.automation_mode:
+                    # Fall back to manual authentication with user guidance
+                    print("\n" + "="*60)
+                    print("🔐 ON-PREMISE AUTHENTICATION REQUIRED")
+                    print("="*60)
+                    print("Automated authentication failed. Please complete manually:")
+                    print("1. Enter your domain credentials")
+                    print("2. Complete any additional authentication steps")
+                    print("3. Wait for redirect back to SharePoint")
+                    print("="*60)
+                
+                # Wait for authentication to complete automatically
+                auth_successful = self.wait_for_authentication_completion(driver)
+                if not auth_successful:
+                    return None
+            else:
+                # No authentication required, or already authenticated
+                if not self.automation_mode:
+                    print("✓ No authentication redirect detected")
             
             # Wait for page to fully load after authentication
-            print("   Waiting for SharePoint page to load completely...")
+            if not self.automation_mode:
+                print("   Waiting for SharePoint page to load completely...")
             try:
                 # Wait for page load to complete
-                WebDriverWait(driver, 60).until(
+                WebDriverWait(driver, self.timeouts['page_load_timeout']).until(
                     lambda d: d.execute_script("return document.readyState") == "complete"
                 )
                 
                 # Additional wait for SharePoint dynamic content
-                print("   Waiting for SharePoint content to render...")
-                time.sleep(10)  # Longer wait for Office 365 SharePoint
+                if not self.automation_mode:
+                    print(f"   Waiting for SharePoint content to render ({self.timeouts['content_wait']}s)...")
+                time.sleep(self.timeouts['content_wait'])
                 
             except TimeoutException:
-                print("⚠️  Page load timeout, but continuing anyway...")
+                if not self.automation_mode:
+                    print("⚠️  Page load timeout, but continuing anyway...")
             
-            # Check if we're still on a login page
+            # Final validation that we're not still on a login page
             final_url = driver.current_url.lower()
-            if any(auth_indicator in final_url for auth_indicator in 
-                   ['login.microsoftonline.com', 'login.microsoft.com', 'accounts.microsoft.com']):
-                print("❌ Still on authentication page - authentication may have failed")
-                if not headless:
-                    retry = input("Try to continue anyway? The page might still be loading... (y/n): ").lower()
-                    if retry != 'y':
+            auth_indicators = ['login.microsoftonline.com', 'login.microsoft.com', 'accounts.microsoft.com']
+            if self.is_onpremise:
+                auth_indicators.extend(['login', 'auth', 'signin', 'logon'])
+            
+            if any(auth_indicator in final_url for auth_indicator in auth_indicators):
+                if not self.automation_mode:
+                    print("❌ Still on authentication page - authentication may have failed")
+                    if not headless:
+                        retry = self.get_user_input_with_fallback("Try to continue anyway? The page might still be loading... (y/n): ", "n", False)
+                        if retry != 'y':
+                            return None
+                    else:
                         return None
                 else:
                     return None
@@ -1004,39 +1121,49 @@ class SharePointTableExtractor:
             
             # Validate that we got meaningful SharePoint content
             if len(html_content) < 1000:
-                print("❌ Retrieved minimal content - possible authentication failure")
+                if not self.automation_mode:
+                    print("❌ Retrieved minimal content - possible authentication failure")
                 return None
                 
             # Look for SharePoint-specific indicators
             sharepoint_indicators = ['sharepoint', 'spfx', '_spPageContextInfo', 'SP.SOD']
             if not any(indicator in html_content.lower() for indicator in sharepoint_indicators):
-                print("⚠️  Content doesn't appear to be from SharePoint")
-                if not headless:
-                    continue_anyway = input("Continue anyway? (y/n): ").lower()
-                    if continue_anyway != 'y':
-                        return None
+                if not self.automation_mode:
+                    print("⚠️  Content doesn't appear to be from SharePoint")
+                    if not headless:
+                        continue_anyway = self.get_user_input_with_fallback("Continue anyway? (y/n): ", "y", False)
+                        if continue_anyway != 'y':
+                            return None
             
-            print("✓ Browser simulation successful!")
-            print(f"   Retrieved {len(html_content):,} characters of SharePoint content")
+            if not self.automation_mode:
+                print("✓ Browser simulation successful!")
+                print(f"   Retrieved {len(html_content):,} characters of SharePoint content")
             
             return html_content
             
         except TimeoutException:
-            print("❌ Browser simulation failed: Page load timeout")
-            print("   Office 365 authentication or SharePoint loading took too long")
+            if not self.automation_mode:
+                print(f"❌ Browser simulation failed: Page load timeout ({self.timeouts['page_load_timeout']}s)")
+                if self.is_onpremise:
+                    print("   On-premise SharePoint loading took too long")
+                else:
+                    print("   Office 365 authentication or SharePoint loading took too long")
         except WebDriverException as e:
-            print(f"❌ Browser simulation failed: WebDriver error - {e}")
-            print("   Please ensure Chrome and ChromeDriver are properly installed")
+            if not self.automation_mode:
+                print(f"❌ Browser simulation failed: WebDriver error - {e}")
+                print("   Please ensure Chrome and ChromeDriver are properly installed")
         except Exception as e:
-            print(f"❌ Browser simulation failed: {e}")
+            if not self.automation_mode:
+                print(f"❌ Browser simulation failed: {e}")
         finally:
             # Always clean up the driver
             if driver:
                 try:
-                    if not headless:
+                    if not headless and not self.automation_mode:
                         input("\nPress Enter to close the browser window...")
                     driver.quit()
-                    print("   Browser closed successfully")
+                    if not self.automation_mode:
+                        print("   Browser closed successfully")
                 except:
                     pass
         
@@ -1141,104 +1268,6 @@ class SharePointTableExtractor:
                 print("\n💡 Office 365 detected - using browser simulation for OAuth authentication")
                 print("   Skipping legacy authentication methods")
             return self.get_html_with_browser_simulation()
-    
-    def run(self):
-        """
-        Main execution method that orchestrates the entire extraction process.
-        Supports both interactive and automation modes.
-        
-        Returns:
-            bool: True if extraction completed successfully, False if any step failed
-        """
-        if not self.automation_mode:
-            print("=" * 80)
-            print("SHAREPOINT TABLE EXTRACTOR")
-            print("=" * 80)
-            print(f"🎯 Target URL: {self.sharepoint_url}")
-            print(f"📁 Output Directory: {self.output_dir}")
-            print(f"🕒 Started at: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            print("=" * 80)
-        
-        try:
-            # Step 1: Get HTML content from SharePoint
-            html_content = self.get_html_content()
-            if not html_content:
-                if not self.automation_mode:
-                    print("\n❌ EXTRACTION FAILED: Could not retrieve HTML content")
-                    print("💡 Troubleshooting tips:")
-                    print("   - Verify the SharePoint URL is correct and accessible")
-                    print("   - Check your network connection")
-                    print("   - Ensure you have proper access permissions")
-                    print("   - Try accessing the URL in your web browser first")
-                return False
-            
-            if not self.automation_mode:
-                print(f"✓ HTML content retrieved successfully ({len(html_content):,} characters)")
-            
-            # Step 2: Extract matching tables
-            matching_tables = self.extract_tables_from_html(html_content)
-            if not matching_tables:
-                if not self.automation_mode:
-                    print("\n❌ EXTRACTION FAILED: No tables found with 'Policy Title' header")
-                    print("💡 This could mean:")
-                    print("   - The page doesn't contain tables with 'Policy Title' in the first column")
-                    print("   - The tables are dynamically loaded and require JavaScript")
-                    print("   - The table structure is different than expected")
-                    print("   - Authentication is required to view the content")
-                return False
-            
-            # Step 3: Merge all matching tables
-            merged_df = self.merge_tables(matching_tables)
-            if merged_df.empty:
-                if not self.automation_mode:
-                    print("\n❌ EXTRACTION FAILED: Table merging resulted in empty data")
-                    print("💡 This could indicate:")
-                    print("   - All found tables were empty or invalid")
-                    print("   - Data cleaning removed all content")
-                    print("   - Schema conflicts prevented merging")
-                return False
-            
-            # Step 4: Save merged data to CSV
-            output_filepath = self.generate_filename()
-            success = self.save_to_csv(merged_df, output_filepath)
-            
-            if success:
-                if not self.automation_mode:
-                    print("\n" + "=" * 80)
-                    print("🎉 EXTRACTION COMPLETED SUCCESSFULLY!")
-                    print("=" * 80)
-                    print(f"✅ Tables found and merged: {len(matching_tables)}")
-                    print(f"✅ Total data rows: {len(merged_df):,}")
-                    print(f"✅ Total columns: {len(merged_df.columns)}")
-                    
-                    # Show link columns
-                    link_cols = [col for col in merged_df.columns if col.endswith(' Link')]
-                    if link_cols:
-                        print(f"✅ Link columns extracted: {len(link_cols)}")
-                        print(f"   Link columns: {', '.join(link_cols)}")
-                    
-                    print(f"✅ Output file: {output_filepath}")
-                    print(f"✅ Completed at: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-                    print("=" * 80)
-                else:
-                    # Brief success message for automation mode
-                    print(f"SUCCESS: Extracted {len(merged_df)} rows to {output_filepath}")
-                return True
-            else:
-                if not self.automation_mode:
-                    print("\n❌ EXTRACTION FAILED: Could not save data to CSV")
-                    print("💡 Check file permissions and disk space")
-                return False
-                
-        except KeyboardInterrupt:
-            if not self.automation_mode:
-                print("\n\n⚠️  EXTRACTION CANCELLED: User interrupted the process")
-            return False
-        except Exception as e:
-            if not self.automation_mode:
-                print(f"\n❌ CRITICAL ERROR: Unexpected error during extraction: {e}")
-                print("💡 Please report this error with the full error message")
-            return False
     
     def extract_tables_from_html(self, html_content):
         """
@@ -1629,51 +1658,57 @@ class SharePointTableExtractor:
     def run(self):
         """
         Main execution method that orchestrates the entire extraction process.
+        Supports both interactive and automation modes.
         
         Returns:
             bool: True if extraction completed successfully, False if any step failed
         """
-        print("=" * 80)
-        print("SHAREPOINT TABLE EXTRACTOR")
-        print("=" * 80)
-        print(f"🎯 Target URL: {self.sharepoint_url}")
-        print(f"📁 Output Directory: {self.output_dir}")
-        print(f"🕒 Started at: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print("=" * 80)
+        if not self.automation_mode:
+            print("=" * 80)
+            print("SHAREPOINT TABLE EXTRACTOR")
+            print("=" * 80)
+            print(f"🎯 Target URL: {self.sharepoint_url}")
+            print(f"📁 Output Directory: {self.output_dir}")
+            print(f"🕒 Started at: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            print("=" * 80)
         
         try:
             # Step 1: Get HTML content from SharePoint
             html_content = self.get_html_content()
             if not html_content:
-                print("\n❌ EXTRACTION FAILED: Could not retrieve HTML content")
-                print("💡 Troubleshooting tips:")
-                print("   - Verify the SharePoint URL is correct and accessible")
-                print("   - Check your network connection")
-                print("   - Ensure you have proper access permissions")
-                print("   - Try accessing the URL in your web browser first")
+                if not self.automation_mode:
+                    print("\n❌ EXTRACTION FAILED: Could not retrieve HTML content")
+                    print("💡 Troubleshooting tips:")
+                    print("   - Verify the SharePoint URL is correct and accessible")
+                    print("   - Check your network connection")
+                    print("   - Ensure you have proper access permissions")
+                    print("   - Try accessing the URL in your web browser first")
                 return False
             
-            print(f"✓ HTML content retrieved successfully ({len(html_content):,} characters)")
+            if not self.automation_mode:
+                print(f"✓ HTML content retrieved successfully ({len(html_content):,} characters)")
             
             # Step 2: Extract matching tables
             matching_tables = self.extract_tables_from_html(html_content)
             if not matching_tables:
-                print("\n❌ EXTRACTION FAILED: No tables found with 'Policy Title' header")
-                print("💡 This could mean:")
-                print("   - The page doesn't contain tables with 'Policy Title' in the first column")
-                print("   - The tables are dynamically loaded and require JavaScript")
-                print("   - The table structure is different than expected")
-                print("   - Authentication is required to view the content")
+                if not self.automation_mode:
+                    print("\n❌ EXTRACTION FAILED: No tables found with 'Policy Title' header")
+                    print("💡 This could mean:")
+                    print("   - The page doesn't contain tables with 'Policy Title' in the first column")
+                    print("   - The tables are dynamically loaded and require JavaScript")
+                    print("   - The table structure is different than expected")
+                    print("   - Authentication is required to view the content")
                 return False
             
             # Step 3: Merge all matching tables
             merged_df = self.merge_tables(matching_tables)
             if merged_df.empty:
-                print("\n❌ EXTRACTION FAILED: Table merging resulted in empty data")
-                print("💡 This could indicate:")
-                print("   - All found tables were empty or invalid")
-                print("   - Data cleaning removed all content")
-                print("   - Schema conflicts prevented merging")
+                if not self.automation_mode:
+                    print("\n❌ EXTRACTION FAILED: Table merging resulted in empty data")
+                    print("💡 This could indicate:")
+                    print("   - All found tables were empty or invalid")
+                    print("   - Data cleaning removed all content")
+                    print("   - Schema conflicts prevented merging")
                 return False
             
             # Step 4: Save merged data to CSV
@@ -1681,27 +1716,41 @@ class SharePointTableExtractor:
             success = self.save_to_csv(merged_df, output_filepath)
             
             if success:
-                print("\n" + "=" * 80)
-                print("🎉 EXTRACTION COMPLETED SUCCESSFULLY!")
-                print("=" * 80)
-                print(f"✅ Tables found and merged: {len(matching_tables)}")
-                print(f"✅ Total data rows: {len(merged_df):,}")
-                print(f"✅ Total columns: {len(merged_df.columns)}")
-                print(f"✅ Output file: {output_filepath}")
-                print(f"✅ Completed at: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-                print("=" * 80)
+                if not self.automation_mode:
+                    print("\n" + "=" * 80)
+                    print("🎉 EXTRACTION COMPLETED SUCCESSFULLY!")
+                    print("=" * 80)
+                    print(f"✅ Tables found and merged: {len(matching_tables)}")
+                    print(f"✅ Total data rows: {len(merged_df):,}")
+                    print(f"✅ Total columns: {len(merged_df.columns)}")
+                    
+                    # Show link columns
+                    link_cols = [col for col in merged_df.columns if col.endswith(' Link')]
+                    if link_cols:
+                        print(f"✅ Link columns extracted: {len(link_cols)}")
+                        print(f"   Link columns: {', '.join(link_cols)}")
+                    
+                    print(f"✅ Output file: {output_filepath}")
+                    print(f"✅ Completed at: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                    print("=" * 80)
+                else:
+                    # Brief success message for automation mode
+                    print(f"SUCCESS: Extracted {len(merged_df)} rows to {output_filepath}")
                 return True
             else:
-                print("\n❌ EXTRACTION FAILED: Could not save data to CSV")
-                print("💡 Check file permissions and disk space")
+                if not self.automation_mode:
+                    print("\n❌ EXTRACTION FAILED: Could not save data to CSV")
+                    print("💡 Check file permissions and disk space")
                 return False
                 
         except KeyboardInterrupt:
-            print("\n\n⚠️  EXTRACTION CANCELLED: User interrupted the process")
+            if not self.automation_mode:
+                print("\n\n⚠️  EXTRACTION CANCELLED: User interrupted the process")
             return False
         except Exception as e:
-            print(f"\n❌ CRITICAL ERROR: Unexpected error during extraction: {e}")
-            print("💡 Please report this error with the full error message")
+            if not self.automation_mode:
+                print(f"\n❌ CRITICAL ERROR: Unexpected error during extraction: {e}")
+                print("💡 Please report this error with the full error message")
             return False
 
 def parse_command_line_arguments():
