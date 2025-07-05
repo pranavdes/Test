@@ -1616,6 +1616,7 @@ class SharePointTableExtractor:
         """
         Clean and standardize a DataFrame by removing empty data and formatting issues.
         Also reorders columns to put Policy Title information first and Type last.
+        Includes text replacement functionality for "Global Middle Office" → "GMO".
         
         Args:
             df (pandas.DataFrame): The DataFrame to clean
@@ -1648,6 +1649,21 @@ class SharePointTableExtractor:
             
             # Fill NaN values with empty string for consistency
             df = df.fillna('')
+            
+            # Replace "Global Middle Office" with "GMO" across all columns
+            replacements_made = 0
+            for col in df.columns:
+                # Count replacements before making them
+                before_replacement = df[col].astype(str).str.contains('Global Middle Office', case=False, na=False).sum()
+                
+                # Perform case-insensitive replacement
+                df[col] = df[col].astype(str).str.replace('Global Middle Office', 'GMO', case=False, regex=False)
+                
+                # Count replacements after
+                replacements_made += before_replacement
+            
+            if replacements_made > 0 and not self.automation_mode:
+                print(f"      ✓ Replaced {replacements_made} instances of 'Global Middle Office' with 'GMO'")
             
             # Add source table identifier first
             df['Source_Table_ID'] = f"Table_{table_id}"
