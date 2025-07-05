@@ -872,7 +872,8 @@ class SharePointTableExtractor:
                     try:
                         if ':contains(' in selector:
                             # Handle XPath for text content
-                            xpath_selector = f"//button[contains(text(), '{selector.split('\"')[1]}')]"
+                            button_text = selector.split('"')[1]
+                            xpath_selector = f"//button[contains(text(), '{button_text}')]"
                             button = driver.find_element(By.XPATH, xpath_selector)
                         else:
                             button = driver.find_element(By.CSS_SELECTOR, selector)
@@ -982,7 +983,8 @@ class SharePointTableExtractor:
                 for selector in submit_selectors:
                     try:
                         if ':contains(' in selector:
-                            xpath_selector = f"//button[contains(text(), '{selector.split('\"')[1]}')]"
+                            button_text = selector.split('"')[1]
+                            xpath_selector = f"//button[contains(text(), '{button_text}')]"
                             button = driver.find_element(By.XPATH, xpath_selector)
                         else:
                             button = driver.find_element(By.CSS_SELECTOR, selector)
