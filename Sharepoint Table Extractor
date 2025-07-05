@@ -16,16 +16,39 @@ Date: 2025
 """
 
 import requests
-from requests_ntlm import HttpNtlmAuth
 from requests.auth import HTTPBasicAuth
+
+# Try to import optional NTLM authentication (not always needed)
+try:
+    from requests_ntlm import HttpNtlmAuth
+    NTLM_AVAILABLE = True
+    print("✓ NTLM authentication support loaded")
+except ImportError:
+    HttpNtlmAuth = None
+    NTLM_AVAILABLE = False
+    print("⚠️  NTLM authentication not available (requests-ntlm not installed)")
+    print("   Basic authentication and browser simulation will still work")
 import pandas as pd
 from bs4 import BeautifulSoup
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import WebDriverException, TimeoutException
+
+# Try to import optional Selenium for browser simulation (not always needed)
+try:
+    from selenium import webdriver
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+    from selenium.common.exceptions import WebDriverException, TimeoutException
+    SELENIUM_AVAILABLE = True
+    print("✓ Browser simulation support loaded")
+except ImportError:
+    webdriver = None
+    Options = None
+    WebDriverException = Exception
+    TimeoutException = Exception
+    SELENIUM_AVAILABLE = False
+    print("⚠️  Browser simulation not available (selenium not installed)")
+    print("   Direct access and authentication will still work")
 import datetime
 import os
 import sys
@@ -43,9 +66,10 @@ class SharePointTableExtractor:
     """
     A comprehensive SharePoint table extractor that handles authentication,
     table parsing, and data merging with robust error handling.
+    Supports both cloud Office 365 and on-premise SharePoint environments.
     """
     
-    def __init__(self, sharepoint_url, output_dir="./"):
+    def __init__(self, sharepoint_url, output_dir="./", timeouts=None):
         """
         Initialize the SharePoint Table Extractor.
         
@@ -53,8 +77,44 @@ class SharePointTableExtractor:
             sharepoint_url (str): The full URL to the SharePoint page containing tables
             output_dir (str): Directory path where the CSV file will be saved
                              Supports Windows paths with spaces (e.g., "C:\\My Documents\\Reports")
+            timeouts (dict, optional): Custom timeout settings in seconds
+                Default timeouts:
+                - request_timeout: 10 seconds for HTTP requests
+                - page_load_timeout: 30 seconds for browser page loads
+                - auth_timeout: 60 seconds for authentication flows
         """
         self.sharepoint_url = sharepoint_url
+        
+        # Detect SharePoint environment type
+        self.is_office365 = any(indicator in sharepoint_url.lower() for indicator in 
+                               ['.sharepoint.com', 'sharepoint.microsoft.com', '.sharepoint-df.com'])
+        self.is_onpremise = not self.is_office365
+        
+        # Set default timeouts based on environment
+        if self.is_onpremise:
+            # On-premise typically has faster network response
+            default_timeouts = {
+                'request_timeout': 10,      # HTTP requests
+                'page_load_timeout': 20,    # Browser page loads
+                'auth_timeout': 30,         # Authentication flows
+                'content_wait': 3           # Wait for content to render
+            }
+        else:
+            # Cloud Office 365 may need longer timeouts
+            default_timeouts = {
+                'request_timeout': 15,      # HTTP requests  
+                'page_load_timeout': 45,    # Browser page loads
+                'auth_timeout': 90,         # Authentication flows
+                'content_wait': 8           # Wait for content to render
+            }
+        
+        # Apply custom timeouts if provided
+        self.timeouts = default_timeouts.copy()
+        if timeouts:
+            self.timeouts.update(timeouts)
+        
+        print(f"🌐 Environment: {'On-Premise SharePoint' if self.is_onpremise else 'Office 365 Cloud'}")
+        print(f"⏱️  Timeouts: Request={self.timeouts['request_timeout']}s, Page Load={self.timeouts['page_load_timeout']}s")
         
         # Convert output directory to Path object for proper Windows handling
         try:
@@ -107,24 +167,39 @@ class SharePointTableExtractor:
     
     def authenticate_with_credentials(self, username=None, password=None, domain=None):
         """
-        Attempt authentication with user-provided credentials using multiple methods.
+        Handle authentication for both on-premise and legacy SharePoint.
+        On-premise SharePoint often supports NTLM/Windows authentication.
         
-        Args:
-            username (str, optional): Username for authentication
-            password (str, optional): Password for authentication  
-            domain (str, optional): Domain for NTLM authentication
-            
         Returns:
-            str or None: HTML content if successful, None if all authentication methods fail
+            str or None: HTML content if successful, None if authentication fails
         """
         print("\n" + "="*50)
-        print("AUTHENTICATION REQUIRED")
-        print("="*50)
+        if self.is_onpremise:
+            print("ON-PREMISE SHAREPOINT AUTHENTICATION")
+            print("="*50)
+            print("On-premise SharePoint typically uses:")
+            print("• Windows Authentication (NTLM)")
+            print("• Active Directory credentials")
+            print("• Domain\\username format")
+        else:
+            print("LEGACY AUTHENTICATION ATTEMPT")
+            print("="*50)
+            print("⚠️  Note: Most Office 365 SharePoint sites use modern authentication")
+            print("   which requires browser-based OAuth flow, not username/password")
+        
+        if not self.is_onpremise:
+            response = input("\nDo you want to try legacy authentication anyway? (y/n): ").lower().strip()
+            if response != 'y':
+                print("Skipping legacy authentication...")
+                return None
         
         try:
             # Get credentials from user if not provided
             if not username:
-                username = input("Enter username: ").strip()
+                if self.is_onpremise:
+                    username = input("Enter username (domain\\user or user@domain.com): ").strip()
+                else:
+                    username = input("Enter username/email: ").strip()
                 if not username:
                     print("❌ Username cannot be empty")
                     return None
@@ -135,8 +210,9 @@ class SharePointTableExtractor:
                     print("❌ Password cannot be empty")
                     return None
             
-            if not domain:
-                domain = input("Enter domain (press Enter to skip): ").strip()
+            if not domain and self.is_onpremise:
+                if '\\' not in username and '@' not in username:
+                    domain = input("Enter domain (press Enter if username already includes domain): ").strip()
             
             # Prepare username for authentication
             if domain:
@@ -144,7 +220,7 @@ class SharePointTableExtractor:
                 print(f"Using domain authentication: {domain}\\{username}")
             else:
                 full_username = username
-                print(f"Using basic authentication: {username}")
+                print(f"Using authentication: {username}")
         
         except KeyboardInterrupt:
             print("\n❌ Authentication cancelled by user")
@@ -153,36 +229,39 @@ class SharePointTableExtractor:
             print(f"❌ Error getting credentials: {e}")
             return None
         
-        # Method 1: Try NTLM authentication (most common for SharePoint)
-        try:
-            print("\n🔐 Attempting NTLM authentication...")
-            self.session.auth = HttpNtlmAuth(full_username, password)
-            
-            response = self.session.get(self.sharepoint_url, timeout=30)
-            
-            if response.status_code == 200:
-                print("✓ NTLM authentication successful")
-                return response.text
-            elif response.status_code == 401:
-                print("❌ NTLM authentication failed: Invalid credentials")
-            elif response.status_code == 403:
-                print("❌ NTLM authentication failed: Access forbidden")
-            else:
-                print(f"❌ NTLM authentication failed: HTTP {response.status_code}")
+        # Method 1: Try NTLM authentication (common for on-premise SharePoint)
+        if NTLM_AVAILABLE:
+            try:
+                print(f"\n🔐 Attempting NTLM authentication...")
+                self.session.auth = HttpNtlmAuth(full_username, password)
                 
-        except requests.exceptions.Timeout:
-            print("❌ NTLM authentication failed: Request timeout (30 seconds)")
-        except requests.exceptions.ConnectionError as e:
-            print(f"❌ NTLM authentication failed: Connection error - {e}")
-        except Exception as e:
-            print(f"❌ NTLM authentication failed: {e}")
+                response = self.session.get(self.sharepoint_url, timeout=self.timeouts['request_timeout'])
+                
+                if response.status_code == 200:
+                    print("✓ NTLM authentication successful")
+                    return response.text
+                elif response.status_code == 401:
+                    print("❌ NTLM authentication failed: Invalid credentials")
+                elif response.status_code == 403:
+                    print("❌ NTLM authentication failed: Access forbidden")
+                else:
+                    print(f"❌ NTLM authentication failed: HTTP {response.status_code}")
+                    
+            except requests.exceptions.Timeout:
+                print(f"❌ NTLM authentication failed: Request timeout ({self.timeouts['request_timeout']} seconds)")
+            except requests.exceptions.ConnectionError as e:
+                print(f"❌ NTLM authentication failed: Connection error - {e}")
+            except Exception as e:
+                print(f"❌ NTLM authentication failed: {e}")
+        else:
+            print("⚠️  Skipping NTLM authentication - requests-ntlm not installed")
         
         # Method 2: Try Basic authentication
         try:
             print("🔐 Attempting Basic authentication...")
             self.session.auth = HTTPBasicAuth(username, password)
             
-            response = self.session.get(self.sharepoint_url, timeout=30)
+            response = self.session.get(self.sharepoint_url, timeout=self.timeouts['request_timeout'])
             
             if response.status_code == 200:
                 print("✓ Basic authentication successful")
@@ -195,84 +274,160 @@ class SharePointTableExtractor:
                 print(f"❌ Basic authentication failed: HTTP {response.status_code}")
                 
         except requests.exceptions.Timeout:
-            print("❌ Basic authentication failed: Request timeout (30 seconds)")
+            print(f"❌ Basic authentication failed: Request timeout ({self.timeouts['request_timeout']} seconds)")
         except requests.exceptions.ConnectionError as e:
             print(f"❌ Basic authentication failed: Connection error - {e}")
         except Exception as e:
             print(f"❌ Basic authentication failed: {e}")
         
-        print("❌ All authentication methods failed")
+        print("❌ Authentication methods failed")
+        if self.is_onpremise:
+            print("💡 For on-premise SharePoint, try:")
+            print("   • Using domain\\username format")
+            print("   • Checking if Windows Authentication is enabled")
+            print("   • Verifying network connectivity to SharePoint server")
+        else:
+            print("💡 For Office 365 sites, try the browser simulation method instead")
         return None
     
     def get_html_with_browser_simulation(self):
         """
-        Fallback method using Selenium WebDriver to simulate a real browser.
-        This method handles JavaScript-heavy pages and complex authentication flows.
+        Browser simulation method optimized for Office 365 authentication.
+        This method opens a browser window where the user can authenticate normally
+        with their Office 365 credentials.
         
         Returns:
             str or None: HTML content if successful, None if browser simulation fails
         """
-        print("\n🌐 Attempting browser simulation with Selenium...")
-        print("   This may take longer as it loads the full page...")
+        if not SELENIUM_AVAILABLE:
+            print("\n❌ Browser simulation not available")
+            print("   Selenium is not installed. Install with: python -m pip install selenium")
+            print("   You'll also need Chrome browser and ChromeDriver")
+            return None
+        
+        print("\n🌐 Starting browser simulation for Office 365 authentication...")
+        print("   This will open a browser window where you can log in normally")
+        
+        # Ask user if they want to see the browser or run headless
+        try:
+            show_browser = input("Show browser window for authentication? (y/n, default=y): ").lower().strip()
+            if show_browser == 'n':
+                headless = True
+                print("   Running in headless mode...")
+            else:
+                headless = False
+                print("   Browser window will be visible for authentication...")
+        except KeyboardInterrupt:
+            print("\n❌ Cancelled by user")
+            return None
         
         driver = None
         try:
-            # Configure Chrome options for headless browsing
+            # Configure Chrome options for Office 365 compatibility
             chrome_options = Options()
-            chrome_options.add_argument("--headless")  # Run without GUI
-            chrome_options.add_argument("--no-sandbox")  # Bypass OS security model
-            chrome_options.add_argument("--disable-dev-shm-usage")  # Overcome limited resource problems
-            chrome_options.add_argument("--disable-gpu")  # Disable GPU hardware acceleration
-            chrome_options.add_argument("--window-size=1920,1080")  # Set window size
-            chrome_options.add_argument("--disable-extensions")  # Disable extensions
-            chrome_options.add_argument("--disable-plugins")  # Disable plugins
-            chrome_options.add_argument("--disable-images")  # Don't load images (faster)
-            chrome_options.add_argument("--disable-javascript")  # Disable JS if not needed
+            if headless:
+                chrome_options.add_argument("--headless")
+            chrome_options.add_argument("--no-sandbox")
+            chrome_options.add_argument("--disable-dev-shm-usage")
+            chrome_options.add_argument("--disable-gpu")
+            chrome_options.add_argument("--window-size=1920,1080")
+            chrome_options.add_argument("--disable-extensions")
+            chrome_options.add_argument("--disable-plugins")
+            # DO NOT disable JavaScript - Office 365 authentication requires it
+            chrome_options.add_argument("--disable-web-security")
+            chrome_options.add_argument("--allow-running-insecure-content")
             
             # Create WebDriver instance
             print("   Starting Chrome WebDriver...")
             driver = webdriver.Chrome(options=chrome_options)
             
-            # Set page load timeout
-            driver.set_page_load_timeout(60)
+            # Set longer timeouts for Office 365 authentication
+            driver.set_page_load_timeout(120)  # 2 minutes for initial load
             
             # Navigate to SharePoint page
-            print(f"   Loading page: {self.sharepoint_url}")
+            print(f"   Loading SharePoint page: {self.sharepoint_url}")
             driver.get(self.sharepoint_url)
             
-            # Wait for page to fully load
-            print("   Waiting for page to load completely...")
-            WebDriverWait(driver, 30).until(
-                lambda d: d.execute_script("return document.readyState") == "complete"
-            )
-            
-            # Additional wait for SharePoint dynamic content
-            print("   Waiting for SharePoint content to render...")
-            time.sleep(5)
-            
-            # Check if authentication is required
+            # Check if we're redirected to Office 365 login
             current_url = driver.current_url.lower()
-            if 'login' in current_url or 'auth' in current_url or 'signin' in current_url:
-                print("❌ Browser simulation reached login page - manual authentication required")
-                print("   The page requires interactive login that cannot be automated")
-                return None
+            if any(auth_indicator in current_url for auth_indicator in 
+                   ['login.microsoftonline.com', 'login.microsoft.com', 'accounts.microsoft.com', 
+                    'login.windows.net', 'sts.windows.net']):
+                
+                print("✓ Detected Office 365 authentication redirect")
+                
+                if not headless:
+                    print("\n" + "="*60)
+                    print("🔐 OFFICE 365 AUTHENTICATION REQUIRED")
+                    print("="*60)
+                    print("Please complete authentication in the browser window:")
+                    print("1. Enter your office email address")
+                    print("2. Complete any additional authentication steps (MFA, etc.)")
+                    print("3. Wait for redirect back to SharePoint")
+                    print("4. DO NOT close the browser window")
+                    print("="*60)
+                    
+                    # Wait for user to complete authentication
+                    print("\nWaiting for authentication to complete...")
+                    print("Press Enter once you've successfully logged in and can see the SharePoint page...")
+                    input()
+                else:
+                    print("❌ Headless mode cannot handle interactive Office 365 authentication")
+                    print("   Please run again with browser window visible (answer 'y' to show browser)")
+                    return None
+            
+            # Wait for page to fully load after authentication
+            print("   Waiting for SharePoint page to load completely...")
+            try:
+                # Wait for page load to complete
+                WebDriverWait(driver, 60).until(
+                    lambda d: d.execute_script("return document.readyState") == "complete"
+                )
+                
+                # Additional wait for SharePoint dynamic content
+                print("   Waiting for SharePoint content to render...")
+                time.sleep(10)  # Longer wait for Office 365 SharePoint
+                
+            except TimeoutException:
+                print("⚠️  Page load timeout, but continuing anyway...")
+            
+            # Check if we're still on a login page
+            final_url = driver.current_url.lower()
+            if any(auth_indicator in final_url for auth_indicator in 
+                   ['login.microsoftonline.com', 'login.microsoft.com', 'accounts.microsoft.com']):
+                print("❌ Still on authentication page - authentication may have failed")
+                if not headless:
+                    retry = input("Try to continue anyway? The page might still be loading... (y/n): ").lower()
+                    if retry != 'y':
+                        return None
+                else:
+                    return None
             
             # Get page source
             html_content = driver.page_source
             
-            # Validate that we got meaningful content
+            # Validate that we got meaningful SharePoint content
             if len(html_content) < 1000:
-                print("❌ Browser simulation returned minimal content - possible access issue")
+                print("❌ Retrieved minimal content - possible authentication failure")
                 return None
+                
+            # Look for SharePoint-specific indicators
+            sharepoint_indicators = ['sharepoint', 'spfx', '_spPageContextInfo', 'SP.SOD']
+            if not any(indicator in html_content.lower() for indicator in sharepoint_indicators):
+                print("⚠️  Content doesn't appear to be from SharePoint")
+                if not headless:
+                    continue_anyway = input("Continue anyway? (y/n): ").lower()
+                    if continue_anyway != 'y':
+                        return None
             
-            print("✓ Browser simulation successful")
-            print(f"   Retrieved {len(html_content):,} characters of content")
+            print("✓ Browser simulation successful!")
+            print(f"   Retrieved {len(html_content):,} characters of SharePoint content")
             
             return html_content
             
         except TimeoutException:
-            print("❌ Browser simulation failed: Page load timeout (60 seconds)")
-            print("   The SharePoint page took too long to load")
+            print("❌ Browser simulation failed: Page load timeout")
+            print("   Office 365 authentication or SharePoint loading took too long")
         except WebDriverException as e:
             print(f"❌ Browser simulation failed: WebDriver error - {e}")
             print("   Please ensure Chrome and ChromeDriver are properly installed")
@@ -282,8 +437,10 @@ class SharePointTableExtractor:
             # Always clean up the driver
             if driver:
                 try:
+                    if not headless:
+                        input("\nPress Enter to close the browser window...")
                     driver.quit()
-                    print("   WebDriver closed successfully")
+                    print("   Browser closed successfully")
                 except:
                     pass
         
@@ -292,7 +449,7 @@ class SharePointTableExtractor:
     def get_html_content(self):
         """
         Get HTML content from SharePoint using multiple fallback methods.
-        Tries direct access first, then authentication, then browser simulation.
+        Optimized for both Office 365 and on-premise SharePoint environments.
         
         Returns:
             str or None: HTML content if any method succeeds, None if all fail
@@ -305,17 +462,42 @@ class SharePointTableExtractor:
         if not self.validate_sharepoint_url():
             return None
         
+        # Display environment-specific guidance
+        if self.is_onpremise:
+            print("🏢 On-premise SharePoint detected")
+            print("   Common authentication: Windows Authentication, NTLM, or Basic")
+            print("   Faster network response times expected")
+        else:
+            print("☁️  Office 365 SharePoint detected")
+            print("   Modern authentication: OAuth 2.0 with browser-based login")
+            print("   May require MFA and longer authentication flows")
+        
         # Method 1: Try direct access without authentication
         try:
-            print("🔗 Attempting direct access (no authentication)...")
-            response = self.session.get(self.sharepoint_url, timeout=30)
+            print(f"🔗 Attempting direct access (timeout: {self.timeouts['request_timeout']}s)...")
+            response = self.session.get(self.sharepoint_url, timeout=self.timeouts['request_timeout'])
             
             if response.status_code == 200:
-                print("✓ Direct access successful")
-                print(f"   Retrieved {len(response.text):,} characters")
-                return response.text
+                # Check if we got actual content or a redirect to login
+                login_indicators = ['sign in', 'login', 'authenticate', 'microsoftonline']
+                if self.is_onpremise:
+                    login_indicators.extend(['ntlm', 'kerberos', 'windows authentication'])
+                
+                if any(indicator in response.text.lower() for indicator in login_indicators):
+                    if self.is_onpremise:
+                        print("⚠️  Direct access redirected to authentication page")
+                    else:
+                        print("⚠️  Direct access redirected to Office 365 login")
+                else:
+                    print("✓ Direct access successful - no authentication required!")
+                    print(f"   Retrieved {len(response.text):,} characters")
+                    return response.text
             elif response.status_code == 401:
-                print("⚠️  Direct access failed: Authentication required (401)")
+                if self.is_onpremise:
+                    print("⚠️  Direct access failed: Authentication required (401)")
+                    print("   On-premise SharePoint requires Windows Authentication")
+                else:
+                    print("⚠️  Direct access failed: Authentication required (401)")
             elif response.status_code == 403:
                 print("⚠️  Direct access failed: Access forbidden (403)")
             elif response.status_code == 404:
@@ -326,20 +508,30 @@ class SharePointTableExtractor:
                 print(f"⚠️  Direct access failed: HTTP {response.status_code}")
                 
         except requests.exceptions.Timeout:
-            print("⚠️  Direct access failed: Request timeout (30 seconds)")
+            print(f"⚠️  Direct access failed: Request timeout ({self.timeouts['request_timeout']} seconds)")
         except requests.exceptions.ConnectionError as e:
             print(f"⚠️  Direct access failed: Connection error - {e}")
-            print("   Please check your internet connection and URL")
+            if self.is_onpremise:
+                print("   Check network connectivity to the SharePoint server")
+            else:
+                print("   Check your internet connection")
         except Exception as e:
             print(f"⚠️  Direct access failed: {e}")
         
-        # Method 2: Try with user authentication
-        html_content = self.authenticate_with_credentials()
-        if html_content:
-            return html_content
-        
-        # Method 3: Browser simulation fallback
-        return self.get_html_with_browser_simulation()
+        # Method 2: Choose authentication strategy based on environment
+        if self.is_onpremise:
+            print("\n💡 Trying credential-based authentication for on-premise SharePoint")
+            html_content = self.authenticate_with_credentials()
+            if html_content:
+                return html_content
+            
+            print("\n💡 Falling back to browser simulation")
+            print("   This may handle Windows Authentication automatically")
+            return self.get_html_with_browser_simulation()
+        else:
+            print("\n💡 Office 365 detected - using browser simulation for OAuth authentication")
+            print("   Skipping legacy authentication methods")
+            return self.get_html_with_browser_simulation()
     
     def extract_tables_from_html(self, html_content):
         """
@@ -775,17 +967,36 @@ def main():
     # Linux/Mac: "/home/username/reports"
     OUTPUT_DIR = r"C:\Users\YourName\Documents\SharePoint Reports"
     
+    # Custom timeouts (optional) - Adjust based on your network speed
+    # Default timeouts are automatically set based on environment:
+    # On-premise: faster timeouts (10s requests, 20s page loads)
+    # Office 365: slower timeouts (15s requests, 45s page loads)
+    CUSTOM_TIMEOUTS = {
+        'request_timeout': 10,      # HTTP request timeout in seconds
+        'page_load_timeout': 20,    # Browser page load timeout in seconds
+        'auth_timeout': 30,         # Authentication flow timeout in seconds
+        'content_wait': 3           # Wait for content to render in seconds
+    }
+    
+    # Set to None to use automatic timeouts, or customize as needed
+    # For very fast networks (on-premise): use shorter timeouts
+    # For slow networks or complex auth: use longer timeouts
+    USE_CUSTOM_TIMEOUTS = False  # Change to True to use CUSTOM_TIMEOUTS above
+    
     # ========================================
     # VALIDATION AND EXECUTION
     # ========================================
     
-    print("SharePoint Table Extractor v2.0")
-    print("-" * 40)
+    print("SharePoint Table Extractor v2.1 - Universal SharePoint Support")
+    print("-" * 55)
     
     # Validate configuration
     if "your-sharepoint-site.com" in SHAREPOINT_URL:
         print("❌ Configuration Error: Please update SHAREPOINT_URL with your actual SharePoint URL")
-        print("   Example: https://company.sharepoint.com/sites/sitename/pages/pagename.aspx")
+        print("   Examples:")
+        print("   Office 365: https://company.sharepoint.com/sites/sitename/pages/pagename.aspx")
+        print("   On-premise: https://sharepoint.company.com/sites/sitename/pages/pagename.aspx")
+        print("   On-premise: https://intranet.company.local/sites/sitename/pages/pagename.aspx")
         input("Press Enter to exit...")
         return
     
@@ -794,16 +1005,72 @@ def main():
         input("Press Enter to exit...")
         return
     
+    # Determine environment and provide specific guidance
+    is_office365 = any(indicator in SHAREPOINT_URL.lower() for indicator in 
+                      ['.sharepoint.com', 'sharepoint.microsoft.com', '.sharepoint-df.com'])
+    is_onpremise = not is_office365
+    
+    if is_office365:
+        print("\n☁️  Office 365 SharePoint Detected!")
+        print("=" * 40)
+        print("This script will:")
+        print("✓ Open a browser window for OAuth authentication")
+        print("✓ Let you log in with your work email normally")
+        print("✓ Handle MFA and any security requirements")
+        print("✓ Extract tables after successful authentication")
+        print("\nYou'll need:")
+        print("• Your work email address")
+        print("• Access to MFA device (if required)")
+        print("• Permission to view the SharePoint page")
+        print("=" * 40)
+    elif is_onpremise:
+        print("\n🏢 On-Premise SharePoint Detected!")
+        print("=" * 40)
+        print("This script will:")
+        print("✓ Try Windows Authentication first")
+        print("✓ Fall back to credential-based authentication")
+        print("✓ Use browser simulation if needed")
+        print("✓ Optimize timeouts for internal network")
+        print("\nYou may need:")
+        print("• Domain\\username credentials")
+        print("• Network access to SharePoint server")
+        print("• VPN connection (if accessing remotely)")
+        print("=" * 40)
+    
+    ready = input(f"\nReady to proceed? (y/n, default=y): ").lower().strip()
+    if ready == 'n':
+        print("Setup cancelled. Update the URL when ready.")
+        input("Press Enter to exit...")
+        return
+    
     try:
-        # Create and run the extractor
-        extractor = SharePointTableExtractor(SHAREPOINT_URL, OUTPUT_DIR)
+        # Create extractor with appropriate timeouts
+        timeouts = CUSTOM_TIMEOUTS if USE_CUSTOM_TIMEOUTS else None
+        extractor = SharePointTableExtractor(SHAREPOINT_URL, OUTPUT_DIR, timeouts)
         success = extractor.run()
         
         # Final status message
         if success:
-            print("\n🎊 All done! Your Policy & Procedures data is ready.")
+            print("\n🎊 Success! Your Policy & Procedures data has been extracted!")
+            if is_office365:
+                print("💡 For future runs, your browser may remember the authentication")
+            elif is_onpremise:
+                print("💡 For future runs, Windows Authentication may work automatically")
         else:
             print("\n💔 Extraction failed. Please check the error messages above.")
+            if is_office365:
+                print("\n💡 Office 365 Troubleshooting Tips:")
+                print("   • Make sure you can access the SharePoint page in your browser first")
+                print("   • Verify you have permission to view the content")
+                print("   • Check if VPN is required for external access")
+                print("   • Try during business hours if your org has time-based policies")
+            elif is_onpremise:
+                print("\n💡 On-Premise Troubleshooting Tips:")
+                print("   • Verify network connectivity to the SharePoint server")
+                print("   • Check if you need VPN for remote access")
+                print("   • Confirm Windows Authentication is enabled")
+                print("   • Try using domain\\username format for credentials")
+                print("   • Ensure you have read permissions on the SharePoint page")
             
     except Exception as e:
         print(f"\n❌ Fatal error: {e}")
