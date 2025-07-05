@@ -609,7 +609,7 @@ class SharePointTableExtractor:
         
         try:
             if not username:
-                if args.automation:
+                if self.automation_mode:
                     print("❌ Automation mode requires username for credential authentication")
                     print("💡 Use: --username 'your_username' or --username 'domain\\username'")
                     return None
