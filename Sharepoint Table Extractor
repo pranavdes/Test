@@ -609,7 +609,7 @@ class SharePointTableExtractor:
         
         try:
             if not username:
-                if self.automation_mode:
+                if args.automation:
                     print("❌ Automation mode requires username for credential authentication")
                     print("💡 Use: --username 'your_username' or --username 'domain\\username'")
                     return None
@@ -641,7 +641,8 @@ class SharePointTableExtractor:
             if domain:
                 full_username = f"{domain}\\{username}"
                 if not self.automation_mode:
-                    print(f"Using domain authentication: {domain}\\{username}")
+                    domain_user = f"{domain}\\{username}"
+                    print(f"Using domain authentication: {domain_user}")
             else:
                 full_username = username
                 if not self.automation_mode:
@@ -715,7 +716,8 @@ class SharePointTableExtractor:
             print("❌ Authentication methods failed")
             if self.is_onpremise:
                 print("💡 For on-premise SharePoint, try:")
-                print("   • Using domain\\username format")
+                domain_username_format = "domain\\username"
+                print(f"   • Using {domain_username_format} format")
                 print("   • Checking if Windows Authentication is enabled")
                 print("   • Verifying network connectivity to SharePoint server")
             else:
@@ -2325,23 +2327,24 @@ def main():
                 elif is_onpremise and not automation_mode:
                     print("💡 For future scheduled runs, Windows Authentication may work automatically")
         else:
-            if not automation_mode or not args.quiet:
-                print("\n💔 Extraction failed. Check error messages above.")
-                
-                # Generate command example for failed runs
-                print(f"\n💡 For automation mode, try:")
-                print(f"   {generate_command_example(args, [])}")
-                
-                if is_office365:
-                    print("\n💡 Office 365 Troubleshooting Tips:")
-                    print("   • Ensure you can access the SharePoint page in your browser first")
-                    print("   • Verify you have permission to view the content")
-                    print("   • Try with --browser-visible true for interactive authentication")
-                elif is_onpremise:
-                    print("\n💡 On-Premise Troubleshooting Tips:")
-                    print("   • Verify network connectivity to the SharePoint server")
-                    print("   • Try with credentials: --username \"domain\\user\" --password \"pass\"")
-                    print("   • Check if Windows Authentication is enabled")
+                if not self.automation_mode or not args.quiet:
+                    print("\n💔 Extraction failed. Check error messages above.")
+                    
+                    # Generate command example for failed runs
+                    print(f"\n💡 For automation mode, try:")
+                    print(f"   {generate_command_example(args, [])}")
+                    
+                    if is_office365:
+                        print("\n💡 Office 365 Troubleshooting Tips:")
+                        print("   • Ensure you can access the SharePoint page in your browser first")
+                        print("   • Verify you have permission to view the content")
+                        print("   • Try with --browser-visible true for interactive authentication")
+                    elif is_onpremise:
+                        print("\n💡 On-Premise Troubleshooting Tips:")
+                        print("   • Verify network connectivity to the SharePoint server")
+                        domain_user_example = "domain\\user"
+                        print(f"   • Try with credentials: --username \"{domain_user_example}\" --password \"pass\"")
+                        print("   • Check if Windows Authentication is enabled")
             
             sys.exit(1)
             
